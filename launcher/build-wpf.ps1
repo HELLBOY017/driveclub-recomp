@@ -4,6 +4,11 @@ param(
     [switch]$SelfContained
 )
 $ErrorActionPreference = 'Stop'
+if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+    if (Test-Path "$env:ProgramFiles\dotnet\dotnet.exe") {
+        $env:PATH = "$env:ProgramFiles\dotnet;$env:PATH"
+    }
+}
 $taskOutput = [IO.Path]::GetFullPath($OutputDirectory)
 $taskNative = Join-Path $taskOutput 'native-build'
 & (Join-Path $PSScriptRoot 'build-preview.ps1') -OutputDirectory $taskNative -Toolchain $Toolchain

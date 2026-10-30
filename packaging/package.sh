@@ -4,7 +4,10 @@
 # usage: packaging/package.sh [version]
 set -euo pipefail
 cd "$(dirname "$0")/.."
-export PATH="/c/msys64/clang64/bin:$PATH"
+# shellcheck source=msys2-env.sh
+[ -f ./msys2-env.sh ] && source ./msys2-env.sh
+export PATH="/c/msys64/clang64/bin:/c/msys64/usr/bin:$PATH"
+[ -d "/c/Program Files/dotnet" ] && export PATH="/c/Program Files/dotnet:$PATH"
 VERSION="${1:-dev}"
 NAME="driveclub-recomp-$VERSION-win64"
 OUT="release/$NAME"
@@ -60,16 +63,16 @@ echo "$VERSION" > "$OUT/version.txt"
 # Online play: the community server (a built folder: driveclubsrv.exe, its DLLs and sqldrivers/), its settings, and
 # the game settings file the launcher copies into place when Online play is on.
 SERVER_BIN="${DC_SERVER_DIR:-packaging/server_bin}"
-if [ ! -f "$SERVER_BIN/driveclubsrv.exe" ]; then
-  echo "The server build is missing: $SERVER_BIN/driveclubsrv.exe (set DC_SERVER_DIR)." >&2
-  exit 1
+if [ -f "$SERVER_BIN/driveclubsrv.exe" ]; then
+  mkdir -p "$OUT/server" "$OUT/online"
+  cp -r "$SERVER_BIN"/. "$OUT/server/"
+  cp docs/online/server-config.json "$OUT/server/config.json"
+  cp docs/online/override-0.tss "$OUT/online/"
+  cp docs/online/README.md docs/online/QUICKSTART.md "$OUT/online/"
+else
+  echo "Notice: $SERVER_BIN/driveclubsrv.exe not found (set DC_SERVER_DIR); skipping server packaging."
 fi
-mkdir -p "$OUT/server" "$OUT/online"
-cp -r "$SERVER_BIN"/. "$OUT/server/"
-cp docs/online/server-config.json "$OUT/server/config.json"
-cp docs/online/override-0.tss "$OUT/online/"
 cp docs/online/play/Allow-Firewall.bat docs/online/play/Allow-Firewall.ps1 "$OUT/"   # next to DriveClub.exe: it finds runtime\ and server\ from there
-cp docs/online/README.md docs/online/QUICKSTART.md "$OUT/online/"
 
 # Every non-system DLL the game program loads, so nothing has to be installed.
 ldd out/DriveClubGame.exe | awk '{print $3}' | grep -i -E '/msys64/|^/(clang64|mingw64|ucrt64)/' | sort -u | while read -r dll; do
@@ -97,10 +100,12 @@ cp packaging/dlss/NVIDIA-DLSS-LICENSE.txt packaging/dlss/dlss_bridge-LICENSE.txt
 cp packaging/nr_bin/driveclub_nr_nvngx.dll "$OUT/runtime/"
 cp gpu/nr_bridge/LICENSE.txt "$OUT/licenses/nr_bridge-LICENSE.txt"
 # The community server is GPL-2.0 software: its licence and where its source is.
-[ -f "$SERVER_BIN/LICENSE" ] && cp "$SERVER_BIN/LICENSE" "$OUT/licenses/driveclub-server-LICENSE.txt"
-printf 'The program in the server folder is the DriveClub community server, GPL-2.0.
+if [ -f "$SERVER_BIN/driveclubsrv.exe" ]; then
+  [ -f "$SERVER_BIN/LICENSE" ] && cp "$SERVER_BIN/LICENSE" "$OUT/licenses/driveclub-server-LICENSE.txt"
+  printf 'The program in the server folder is the DriveClub community server, GPL-2.0.
 Source code: https://github.com/shad-net/driveclub-server and https://github.com/Judaswick/driveclub-server (branch coop).
 ' > "$OUT/licenses/driveclub-server-SOURCE.txt"
+fi
 # DLLs the game program loads by name at run time.
 for extra in SDL3.dll; do
   [ -f "out/$extra" ] && cp "out/$extra" "$OUT/runtime/" || true
