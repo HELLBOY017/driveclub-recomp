@@ -2105,7 +2105,41 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
             const u32 out = two_masks ? 5 : one_mask ? 4 :
                 cs.images[3].is_written ? 3 : cs.images[4].is_written ? 4 : 0;
             if (valid_mask && out && cs.images[out].is_written && format(out) == hdr) {
-                drive_aa->OnTaa(bound_images[0], fg_depth, bound_images[out]);
+                DriveAA::DcInputs dc_inputs{};
+                bool dc_ok = false;
+                if (cs.buffers.size() >= 3 &&
+                    !cs.buffers[0].IsSpecial() && !cs.buffers[1].IsSpecial() && !cs.buffers[2].IsSpecial()) {
+                    const u64 alignment = instance.StorageMinAlignment();
+                    dc_ok = true;
+                    for (u32 b = 0; b < 3; ++b) {
+                        const auto sharp = cs.buffers[b].GetSharp(cs);
+                        const VAddr addr = sharp.base_address;
+                        const u32 size = sharp.GetSize();
+                        if (!addr || !size) {
+                            dc_ok = false;
+                            break;
+                        }
+                        auto [buf, offset] = buffer_cache.ObtainBuffer(addr, size, false);
+                        if (!buf) {
+                            dc_ok = false;
+                            break;
+                        }
+                        const u64 offset_aligned = Common::AlignDown(offset, alignment);
+                        const u64 adjust = offset - offset_aligned;
+                        dc_inputs.buffers[b] = {
+                            .buffer = buf->Handle(),
+                            .offset = offset_aligned,
+                            .size = size + adjust,
+                        };
+                        dc_inputs.dword_offsets[b] = static_cast<u32>(adjust / 4);
+                    }
+                    if (dc_ok && memory->IsValidGpuMapping(cs.buffers[0].GetSharp(cs).base_address, 0)) {
+                        const auto* f0 = reinterpret_cast<const float*>(cs.buffers[0].GetSharp(cs).base_address);
+                        dc_inputs.tan_half_fov_y = f0[93];
+                    }
+                }
+                drive_aa->OnTaa(bound_images[0], fg_depth, bound_images[out], bound_images[1],
+                                dc_ok ? &dc_inputs : nullptr);
             }
         }
     }
