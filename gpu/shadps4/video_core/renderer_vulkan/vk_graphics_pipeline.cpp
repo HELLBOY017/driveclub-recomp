@@ -168,13 +168,37 @@ GraphicsPipeline::GraphicsPipeline(
 
     boost::container::static_vector<vk::PipelineShaderStageCreateInfo, MaxShaderStages>
         shader_stages;
+    std::array<vk::SpecializationMapEntry, 4> motion_spec_entries;
+    std::array<u32, 4> motion_spec_data;
+    vk::SpecializationInfo motion_spec_info{};
     auto stage = u32(Shader::SwStage::Vertex);
     if (infos[stage]) {
-        shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
+        auto& vs_stage = shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
             .stage = vk::ShaderStageFlagBits::eVertex,
             .module = modules[stage],
             .pName = "main",
         });
+        if (key.motion_vectors) {
+            motion_spec_entries = {
+                vk::SpecializationMapEntry{0, 0 * sizeof(u32), sizeof(u32)},
+                vk::SpecializationMapEntry{1, 1 * sizeof(u32), sizeof(u32)},
+                vk::SpecializationMapEntry{2, 2 * sizeof(u32), sizeof(u32)},
+                vk::SpecializationMapEntry{3, 3 * sizeof(u32), sizeof(u32)},
+            };
+            motion_spec_data = {
+                static_cast<u32>(Shader::MotionVectors::params_address),
+                static_cast<u32>(Shader::MotionVectors::params_address >> 32),
+                static_cast<u32>(Shader::MotionVectors::positions_address),
+                static_cast<u32>(Shader::MotionVectors::positions_address >> 32),
+            };
+            motion_spec_info = {
+                .mapEntryCount = static_cast<u32>(motion_spec_entries.size()),
+                .pMapEntries = motion_spec_entries.data(),
+                .dataSize = sizeof(motion_spec_data),
+                .pData = motion_spec_data.data(),
+            };
+            vs_stage.pSpecializationInfo = &motion_spec_info;
+        }
     }
     stage = u32(Shader::SwStage::Geometry);
     if (infos[stage]) {

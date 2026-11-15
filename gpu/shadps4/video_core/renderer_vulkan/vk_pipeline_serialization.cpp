@@ -135,12 +135,6 @@ bool LoadShaderMeta(Serialization::Archive& ar, Shader::Info& info,
     spec.Deserialize(ar);
     info.Deserialize(ar);
 
-    // Motion vertex shaders embed session-local buffer device addresses. They must be
-    // recompiled for the current allocation, never loaded from a previous process.
-    if (info.hw_stage == Shader::HwStage::Vertex && spec.runtime_info.hw.vs.motion_vectors) {
-        return false;
-    }
-
     fetch_shader_data = spec.fetch_shader_data;
     return true;
 }
@@ -233,14 +227,26 @@ bool GraphicsPipeline::SerializationSupport::Deserialize(Serialization::Archive&
     return true;
 }
 
+static bool SpirvHasSpecConstants(std::span<const u32> spv) {
+    if (spv.size() < 5) return false;
+    size_t i = 5;
+    while (i < spv.size()) {
+        const u32 word = spv[i];
+        const u32 length = word >> 16;
+        const u32 opcode = word & 0xffff;
+        if (length == 0 || i + length > spv.size()) break;
+        if (opcode == 50 || opcode == 51) { // OpSpecConstant / OpSpecConstantComposite
+            return true;
+        }
+        i += length;
+    }
+    return false;
+}
+
 bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
     sel = PipelineSelection{.regs = sel.regs};
     SCOPE_EXIT { sel = PipelineSelection{.regs = sel.regs}; };
     sel.graphics_key.Deserialize(ar);
-    // Object-history vertex shaders embed this session's buffer addresses.
-    if (sel.graphics_key.motion_vectors) {
-        return false;
-    }
 
     GraphicsPipeline::SerializationSupport sdata{};
     sdata.Deserialize(ar);
@@ -297,6 +303,13 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
                                        fmt::format("{:#018x}", binary_hash),
                                        spv);
     if (spv.empty() || XXH3_64bits(spv.data(), spv.size() * sizeof(u32)) != binary_hash) {
+        return false;
+    }
+
+    // Motion vertex shaders must use specialization constants for device addresses.
+    // Legacy entries from earlier runs that baked literal addresses are rejected and recompiled.
+    if (program->info.hw_stage == Shader::HwStage::Vertex &&
+        spec.runtime_info.hw.vs.motion_vectors && !SpirvHasSpecConstants(spv)) {
         return false;
     }
 

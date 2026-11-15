@@ -1324,9 +1324,17 @@ void TextureCache::GarbageCollectImages() {
         if (instance.IsIntegrated() || driver_budget || forced_budget) {
             const u64 budget = forced_budget ? forced_budget : instance.GetDeviceMemoryBudgetNow();
             if (budget != 0) {
-                trigger_gc_memory = budget / 10 * 7;
-                pressure_gc_memory = budget / 100 * 85;
-                critical_gc_memory = budget / 100 * 95;
+                if (instance.IsIntegrated()) {
+                    trigger_gc_memory = budget / 10 * 7;
+                    pressure_gc_memory = budget / 100 * 85;
+                    critical_gc_memory = budget / 100 * 95;
+                } else {
+                    // On discrete GPUs (8 GB+), leave generous headroom before triggering GC
+                    // so burst texture uploads at race start do not trigger thrashing.
+                    trigger_gc_memory = budget / 100 * 85;
+                    pressure_gc_memory = budget / 100 * 92;
+                    critical_gc_memory = budget / 100 * 97;
+                }
             }
         }
     }
@@ -1342,7 +1350,10 @@ void TextureCache::GarbageCollectImages() {
     const auto configure = [&](bool allow_aggressive) {
         pressured = total_used_memory >= pressure_gc_memory;
         aggresive = allow_aggressive && total_used_memory >= critical_gc_memory;
-        ticks_to_destroy = aggresive ? 160 : pressured ? 80 : 16;
+        // lru_cache.ForEachItemBelow(gc_tick - ticks_to_destroy) visits items with tick <= gc_tick - ticks_to_destroy.
+        // Subtracting a smaller number visits more recent items (aggressive); subtracting a larger number
+        // only visits older items (mild).
+        ticks_to_destroy = aggresive ? 16 : pressured ? 80 : 300;
         ticks_to_destroy = std::min(ticks_to_destroy, gc_tick);
         num_deletions = aggresive ? 40 : pressured ? 20 : 10;
     };
@@ -1489,7 +1500,7 @@ void TextureCache::GarbageCollectSamplers() {
     const auto configure = [&](bool allow_aggressive) {
         pressured = total_used_samplers >= pressure_gc_samplers;
         aggresive = allow_aggressive && total_used_samplers >= critical_gc_samplers;
-        ticks_to_destroy = aggresive ? 160 : pressured ? 80 : 16;
+        ticks_to_destroy = aggresive ? 16 : pressured ? 80 : 300;
         ticks_to_destroy = std::min(ticks_to_destroy, gc_tick);
         num_deletions = aggresive ? 40 : pressured ? 20 : 10;
     };
