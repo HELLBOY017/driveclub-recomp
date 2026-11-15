@@ -164,6 +164,12 @@ void HdrPass::Render(vk::CommandBuffer cmdbuf, vk::ImageView frame, vk::ImageVie
         cmdbuf.clearColorImage(vk::Image(state), vk::ImageLayout::eGeneral,
                                vk::ClearColorValue{std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}},
                                color_range);
+        const vk::MemoryBarrier2 after_clear{
+            .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+            .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+            .dstAccessMask = vk::AccessFlagBits2::eShaderRead};
+        cmdbuf.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &after_clear});
     }
     const auto state_ready = [&](vk::PipelineStageFlags2 src, vk::AccessFlags2 src_access,
                                  vk::PipelineStageFlags2 dst, vk::AccessFlags2 dst_access) {
@@ -199,10 +205,9 @@ void HdrPass::Render(vk::CommandBuffer cmdbuf, vk::ImageView frame, vk::ImageVie
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *exposure_pipeline);
         cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *exposure_layout, 0, writes);
         cmdbuf.dispatch(1, 1, 1);
+        state_ready(vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderWrite,
+                    vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderRead);
     }
-    state_ready(vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eTransfer,
-                vk::AccessFlagBits2::eShaderWrite | vk::AccessFlagBits2::eTransferWrite,
-                vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderRead);
 
     const auto frame_info = sampled_info(frame);
     const auto hudless_info = sampled_info(hudless ? hudless : frame);
