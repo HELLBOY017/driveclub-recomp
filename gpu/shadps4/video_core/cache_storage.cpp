@@ -70,6 +70,26 @@ void ProcessIO(const std::stop_token& stoken) {
             --num_requests;
         }
     }
+
+    // Drain remaining pending write requests before the IO worker exits
+    while (true) {
+        std::packaged_task<void()> request{};
+        {
+            std::scoped_lock lock{m_request};
+            if (req_queue.empty()) {
+                break;
+            }
+            request = std::move(req_queue.front());
+            req_queue.pop();
+        }
+
+        if (request.valid()) {
+            request();
+            request.get_future().wait();
+        }
+
+        --num_requests;
+    }
 }
 
 constexpr std::string GetBlobFileExtension(BlobType type) {
