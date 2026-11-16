@@ -52,7 +52,11 @@ Sampler::Sampler(const Vulkan::Instance& instance, const AmdGpu::Sampler& sample
         const unsigned n = ++seen;
         forced += force_af && !game_aniso;
         already += game_aniso;
-        if (n == 1 || n == 50 || n == 500 || n == 5000) {
+        static const bool sampler_trace = [] {
+            const char* env = std::getenv("BB_SAMPLER_TRACE");
+            return env && env[0] == '1';
+        }();
+        if (sampler_trace && (n == 1 || n == 50 || n == 500 || n == 5000)) {
             std::printf("Samplers: %u created, anisotropy %dx forced on %u, the game asked for it on %u%s\n",
                         n, override_af, forced.load(), already.load(),
                         instance.IsAnisotropicFilteringSupported() ? "" : " (the GPU does not support it)");

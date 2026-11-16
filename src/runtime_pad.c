@@ -68,7 +68,13 @@ static int initialized, sdl_ready;
 static struct { bool used, ext; int32_t user, type, index; } handles[MAX_HANDLES];
 static bool handle_ok(int32_t h) { return h>=1 && h<=MAX_HANDLES && handles[h-1].used; }
 static bool is_wheel_port(int32_t h) { return handle_ok(h) && handles[h-1].type==2 && !handles[h-1].ext; }
-#define PADLOG(name) do { static unsigned n_; if (n_++<4) printf("Runtime: %s from +0x%llx\n",name,(unsigned long long)((uintptr_t)__builtin_return_address(0)-runtime_image_base)); } while (0)
+#define PADLOG(name) do { \
+    static int pad_trace_ = -1; \
+    if (pad_trace_ < 0) { const char *e_ = getenv("BB_PAD_TRACE"); pad_trace_ = (e_ && e_[0] == '1'); } \
+    if (pad_trace_) { \
+        static unsigned n_; if (n_++<4) printf("Runtime: %s from +0x%llx\n",name,(unsigned long long)((uintptr_t)__builtin_return_address(0)-runtime_image_base)); \
+    } \
+} while (0)
 static SDL_Gamepad *gamepad;
 static size_t reads;
 static uint8_t connected_count;

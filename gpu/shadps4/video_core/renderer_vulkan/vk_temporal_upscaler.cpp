@@ -749,7 +749,9 @@ void TemporalUpscaler::ExtraSharpen(vk::CommandBuffer cmdbuf, vk::Image target, 
     const auto device = instance.GetDevice();
     if (extra_sharpen_width != w || extra_sharpen_height != h) {
         // Retired command buffers may still read the old copy. `cmdbuf` stays open.
-        scheduler.WaitSubmitted();
+        if (extra_sharpen_image) {
+            scheduler.WaitSubmitted();
+        }
         extra_sharpen_view.reset();
         extra_sharpen_image = VideoCore::UniqueImage(device, instance.GetAllocator());
         extra_sharpen_image.Create(vk::ImageCreateInfo{
@@ -2005,7 +2007,9 @@ bool TemporalUpscaler::RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource
     bool ok = true;
     if (!dlss->HasFeature(desc)) {
         // The previous feature may still be in use by submitted work; `cmdbuf` stays open.
-        scheduler.WaitSubmitted();
+        if (dlss->HasAnyFeature()) {
+            scheduler.WaitSubmitted();
+        }
         dlss->ReleaseFeature();
         ok = dlss->CreateFeature(cmdbuf, desc);
         reset = true;

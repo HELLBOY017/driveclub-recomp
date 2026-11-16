@@ -97,10 +97,16 @@ bool CorrectMotionBlur(const Shader::Info& stage, void* data, u64 size) {
     if (!DriveMotionBlur::Correct(data, size, dt, reference)) return false;
     static std::atomic<int> logged_reference{};
     if (logged_reference.exchange(reference) != reference) {
-        std::printf("MotionBlur: %s shader=%08x simulated_dt=%.6f coefficient=%.6f\n",
-                    reference == 30 ? "Slow" : "Fast", u32(stage.pgm_hash), dt,
-                    reinterpret_cast<const float*>(data)[DriveMotionBlur::ExposureWord]);
-        std::fflush(stdout);
+        static const bool mb_trace = [] {
+            const char* env = BB_DIAGNOSTIC_ENV("BB_MOTIONBLUR_TRACE");
+            return env && env[0] == '1';
+        }();
+        if (mb_trace) {
+            std::printf("MotionBlur: %s shader=%08x simulated_dt=%.6f coefficient=%.6f\n",
+                        reference == 30 ? "Slow" : "Fast", u32(stage.pgm_hash), dt,
+                        reinterpret_cast<const float*>(data)[DriveMotionBlur::ExposureWord]);
+            std::fflush(stdout);
+        }
     }
     return true;
 }
@@ -1628,7 +1634,9 @@ void Rasterizer::CaptureHdrHudless(VideoCore::ImageId display, VAddr address) {
         copy->width = 0;
     }
     if (copy->width != w || copy->height != h || copy->format != image.info.pixel_format) {
-        scheduler.WaitSubmitted();  // the presenter may still read the old one
+        if (copy->image) {
+            scheduler.WaitSubmitted();  // the presenter may still read the old one
+        }
         copy->view.reset();
         copy->image = VideoCore::UniqueImage(instance.GetDevice(), instance.GetAllocator());
         copy->image.Create(vk::ImageCreateInfo{
@@ -1714,7 +1722,9 @@ void Rasterizer::CaptureHdrHudless(VideoCore::ImageId display, VAddr address) {
         return;
     }
     if (copy->scene_width != sw || copy->scene_height != sh || copy->scene_format != scene_format) {
-        scheduler.WaitSubmitted();
+        if (copy->scene) {
+            scheduler.WaitSubmitted();
+        }
         copy->scene_view.reset();
         copy->scene = VideoCore::UniqueImage(instance.GetDevice(), instance.GetAllocator());
         copy->scene.Create(vk::ImageCreateInfo{
@@ -1768,9 +1778,15 @@ void Rasterizer::CaptureHdrHudless(VideoCore::ImageId display, VAddr address) {
     static bool reported = false;
     if (!reported) {
         reported = true;
-        std::printf("HDR: the picture before the UI, %ux%u %s; the scene, %ux%u %s%s\n", w, h,
-                    vk::to_string(image.info.pixel_format).c_str(), sw, sh,
-                    vk::to_string(scene_format).c_str(), hdr_scene_upscaled ? " (upscaled)" : "");
+        static const bool hdr_trace = [] {
+            const char* env = BB_DIAGNOSTIC_ENV("BB_HDR_TRACE");
+            return env && env[0] == '1';
+        }();
+        if (hdr_trace) {
+            std::printf("HDR: the picture before the UI, %ux%u %s; the scene, %ux%u %s%s\n", w, h,
+                        vk::to_string(image.info.pixel_format).c_str(), sw, sh,
+                        vk::to_string(scene_format).c_str(), hdr_scene_upscaled ? " (upscaled)" : "");
+        }
     }
 }
 
@@ -3185,7 +3201,11 @@ static bool ContinueGeneralRun(VideoCore::Image& image, const Ranges& read, cons
     };
     const bool skip =
         same_state && !hits(read, run.written) && !hits(written, run.written) && !hits(written, run.read);
-    if (logged.fetch_add(1, std::memory_order_relaxed) < 24) {
+    static const bool range_trace = [] {
+        const char* env = BB_DIAGNOSTIC_ENV("BB_RANGE_TRACE");
+        return env && env[0] == '1';
+    }();
+    if (range_trace && logged.fetch_add(1, std::memory_order_relaxed) < 24) {
         std::string text;
         for (const auto* ranges : {&read, &written}) {
             text += ranges == &read ? " reads" : " writes";
@@ -3205,7 +3225,7 @@ static bool ContinueGeneralRun(VideoCore::Image& image, const Ranges& read, cons
     }
     run.read.insert(run.read.end(), read.begin(), read.end());
     run.written.insert(run.written.end(), written.begin(), written.end());
-    if ((skipped.fetch_add(1, std::memory_order_relaxed) & 4095) == 0) {
+    if (range_trace && (skipped.fetch_add(1, std::memory_order_relaxed) & 4095) == 0) {
         std::printf("BB_RANGE_BARRIERS: %llu compute barriers skipped, %llu kept (image %llx %ux%u, %u mips, %u layers)\n",
                     static_cast<unsigned long long>(skipped.load()), static_cast<unsigned long long>(barriers.load()),
                     static_cast<unsigned long long>(image.info.guest_address), image.info.size.width,
@@ -3452,8 +3472,12 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
             cube_lod = CubeLod{std::min(std::max(float(lod), ssharp.MinLod()), ssharp.MaxLod()),
                                ssharp.mip_filter == AmdGpu::MipFilter::Linear, ssharp};
         }
+        static const bool cube_lod_trace = [] {
+            const char* env = BB_DIAGNOSTIC_ENV("BB_CUBE_LOD_TRACE");
+            return env && env[0] == '1';
+        }();
         static std::atomic<u32> logged{0};
-        if (logged.fetch_add(1, std::memory_order_relaxed) < 16) {
+        if (cube_lod_trace && logged.fetch_add(1, std::memory_order_relaxed) < 16) {
             std::printf("BB_CUBE_LOD_RANGE: ring %s lod %u bias %.3f min %.3f max %.3f mip filter %u%s -> %s\n",
                         ring ? "yes" : "no", lod, ssharp.LodBias(), ssharp.MinLod(), ssharp.MaxLod(),
                         u32(ssharp.mip_filter.Value()), anisotropic ? " anisotropic" : "",
@@ -3465,7 +3489,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                                            const VideoCore::ImageViewInfo& view) {
         static const bool skip = [] {
             const char* env = std::getenv("BB_CUBE_LOD_RANGE_SELFTEST");
-            return env && env[0] == '0';
+            return !env || env[0] != '1';
         }();
         if (skip) {
             return true;
@@ -3643,7 +3667,11 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                         if (use->narrowed) {
                             static std::atomic<u64> cube_skips{0}, cube_total{0};
                             cube_skips.fetch_add(joined, std::memory_order_relaxed);
-                            if ((cube_total.fetch_add(1, std::memory_order_relaxed) & 2047) == 0) {
+                            static const bool cube_lod_trace = [] {
+                                const char* env = BB_DIAGNOSTIC_ENV("BB_CUBE_LOD_TRACE");
+                                return env && env[0] == '1';
+                            }();
+                            if (cube_lod_trace && (cube_total.fetch_add(1, std::memory_order_relaxed) & 2047) == 0) {
                                 std::printf("BB_CUBE_LOD_RANGE: %llu of %llu dispatches without a barrier\n",
                                             static_cast<unsigned long long>(cube_skips.load()),
                                             static_cast<unsigned long long>(cube_total.load()));

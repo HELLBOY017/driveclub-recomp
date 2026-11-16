@@ -1872,8 +1872,12 @@ void EndDeferral(u32 site, const void* obj, u32 want, char path) {
                                                                                  d.first)
                                 .count();
             g_exact_defer_ns[site] += u64(ns);
+            static const bool exposure_trace = [] {
+                const char* env = BB_DIAGNOSTIC_ENV("BB_EXPOSURE_TRACE");
+                return env && env[0] == '1';
+            }();
             static u32 logged = 0;
-            if (++logged <= 24) {
+            if (exposure_trace && ++logged <= 24) {
                 std::printf("Exposure exact site %u: request %u of %p answered (%c) after %u \"not ready\", %.1f ms\n",
                             site, d.want, obj, path, n, ns / 1e6);
             }
@@ -1998,8 +2002,12 @@ void VerifyExact(u32 site, VAddr addr, const u8* served, u32 size, u32 generatio
     } else {
         // Acceptance counts raw matches only: every mismatch is printed when it happens; the
         // resolver below only says whether a later snapshot holds the same bytes.
+        static const bool exposure_trace = [] {
+            const char* env = BB_DIAGNOSTIC_ENV("BB_EXPOSURE_TRACE");
+            return env && env[0] == '1';
+        }();
         static u32 printed = 0;
-        if (++printed <= 32) {
+        if (exposure_trace && ++printed <= 32) {
             std::printf("Exposure exact: MISMATCH site %u addr %llx generation %u id %llu\n", site,
                         (unsigned long long)addr, generation, (unsigned long long)id);
         }
@@ -2024,7 +2032,11 @@ void ResolveExactMismatches(Vulkan::Rasterizer& r) {
         if (++m.calls < 96) {
             return false;
         }
-        if (++g_exact_stats[m.site].unexplained <= 16) {
+        static const bool exposure_trace = [] {
+            const char* env = BB_DIAGNOSTIC_ENV("BB_EXPOSURE_TRACE");
+            return env && env[0] == '1';
+        }();
+        if (exposure_trace && ++g_exact_stats[m.site].unexplained <= 16) {
             std::printf("Exposure exact: UNEXPLAINED mismatch site %u addr %llx generation %u id %llu\n", m.site,
                         (unsigned long long)m.addr, m.generation, (unsigned long long)m.id);
         }
@@ -2034,6 +2046,13 @@ void ResolveExactMismatches(Vulkan::Rasterizer& r) {
 
 // Under g_exact_stats_mutex.
 void PrintExactStats() {
+    static const bool exposure_trace = [] {
+        const char* env = BB_DIAGNOSTIC_ENV("BB_EXPOSURE_TRACE");
+        return env && env[0] == '1';
+    }();
+    if (!exposure_trace) {
+        return;
+    }
     static u64 calls = 0;
     if ((++calls & 511) != 1) {
         return;

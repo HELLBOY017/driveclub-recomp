@@ -201,7 +201,7 @@ static int32_t mount(int32_t user, const char *title, const DirName *dir, uint32
     ++mounts_done;
     pthread_mutex_unlock(&lock);
     static unsigned logged_mounts;
-    if (logged_mounts++ < 24 || !exists) {
+    if (logged_mounts++ < 4 || !exists) {
         printf("Runtime: save data '%s' mounted at %s (%s%s)\n",dir->data,result->point.data,
                exists ? "existing" : "created",(mode & MODE_RDONLY) ? ", read-only" : "");
     }

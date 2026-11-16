@@ -671,7 +671,7 @@ static int64_t do_read(int fd,void *buffer,uint64_t size) {
     if (h<0) return -EBADF;
     touch_for_write(buffer,size);
     ssize_t n=host_read(h,buffer,size);
-    { static unsigned dat_reads; if (n>=0 && !strncmp(files[fd].path,"/app0/game",10) && (dat_reads++<60 || dat_reads%2000==0))
+    { static unsigned dat_reads; if (n>=0 && !strncmp(files[fd].path,"/app0/game",10) && dat_reads++<30)
         printf("Runtime: read %s size %llu -> %lld (#%u)\n",files[fd].path,(unsigned long long)size,(long long)n,dat_reads); }
     if (n==0 && size>0 && !strncmp(files[fd].path,"/app0/game",10)) {
         /* A volume of the game archive that ends early (an incomplete copy of the dump): the game keeps asking. */
@@ -692,7 +692,7 @@ static int64_t do_pread(int fd,void *buffer,uint64_t size,int64_t offset) {
     if (h<0) return -EBADF;
     touch_for_write(buffer,size);
     ssize_t n=pread(h,buffer,size,offset);
-    { static unsigned dat_reads; if (n>=0 && !strncmp(files[fd].path,"/app0/game",10) && (dat_reads++<60 || dat_reads%2000==0))
+    { static unsigned dat_reads; if (n>=0 && !strncmp(files[fd].path,"/app0/game",10) && dat_reads++<30)
         printf("Runtime: pread %s @%lld size %llu -> %lld (#%u)\n",files[fd].path,(long long)offset,(unsigned long long)size,(long long)n,dat_reads); }
     if (n<0) { if (audio_trace()) printf("Audio trace: pread(fd %d, %llu @%lld) failed, errno %d\n",fd,(unsigned long long)size,(long long)offset,errno); return -errno; }
     __atomic_add_fetch(&reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&bytes_read,(uint64_t)n,__ATOMIC_RELAXED);
