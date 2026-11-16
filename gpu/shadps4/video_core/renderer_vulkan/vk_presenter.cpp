@@ -1143,7 +1143,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     // spaced sequence on the panel.
     // The source must be complete on the GPU before its images are spaced out.
     const auto source_began = std::chrono::steady_clock::now();
-    if (frame->source_scheduler) {
+    if (generated && frame->source_scheduler) {
         frame->source_scheduler->Wait(frame->ready_tick);
     }
     const auto paced = std::chrono::steady_clock::now();
