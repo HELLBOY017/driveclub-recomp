@@ -100,6 +100,11 @@ public:
         return true;
     }
 
+    [[nodiscard]] bool IsReady() const noexcept {
+        return ready;
+    }
+    void Prewarm(u32 ow, u32 oh);
+
 private:
     struct CachedView {
         vk::Image image;

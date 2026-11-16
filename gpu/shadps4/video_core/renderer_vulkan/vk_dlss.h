@@ -65,6 +65,7 @@ public:
     /// DLSS quality mode for an output/render size ratio (0 DLAA .. 4 Ultra Performance).
     static int QualityForScale(float scale);
     [[nodiscard]] bool HasFeature(const FeatureDesc& desc) const;
+    [[nodiscard]] bool HasAnyFeature() const;
     /// Records the feature creation. The GPU must be done with the previous one.
     bool CreateFeature(vk::CommandBuffer command, const FeatureDesc& desc);
     bool Evaluate(vk::CommandBuffer command, const Frame& frame);

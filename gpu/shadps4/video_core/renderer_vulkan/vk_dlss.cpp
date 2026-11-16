@@ -212,6 +212,10 @@ bool Dlss::HasFeature(const FeatureDesc& desc) const {
     return impl->feature && *impl->feature == desc;
 }
 
+bool Dlss::HasAnyFeature() const {
+    return impl->feature.has_value();
+}
+
 bool Dlss::CreateFeature(vk::CommandBuffer command, const FeatureDesc& desc) {
     if (!impl->available) {
         return false;
@@ -340,6 +344,9 @@ std::string Dlss::Problem() const {
     return {};
 }
 bool Dlss::HasFeature(const FeatureDesc&) const {
+    return false;
+}
+bool Dlss::HasAnyFeature() const {
     return false;
 }
 bool Dlss::CreateFeature(vk::CommandBuffer, const FeatureDesc&) {

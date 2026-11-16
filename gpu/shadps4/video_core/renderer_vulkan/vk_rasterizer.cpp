@@ -4967,6 +4967,13 @@ void Rasterizer::MarkPass(const GraphicsPipeline* pipeline, const RenderState& s
 }
 
 void Rasterizer::NoteFrameStart() {
+    if (drive_aa && !drive_aa->IsReady()) {
+        const u32 ow = BbFrame::output_w.load(std::memory_order_relaxed);
+        const u32 oh = BbFrame::output_h.load(std::memory_order_relaxed);
+        if (ow > 0 && oh > 0) {
+            drive_aa->Prewarm(ow, oh);
+        }
+    }
     if (auto* profiler = GpuProfiler::Get()) {
         profiler->BeginFrame();
     }

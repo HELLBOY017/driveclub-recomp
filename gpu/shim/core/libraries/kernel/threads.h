@@ -38,10 +38,12 @@ public:
         } catch (const std::system_error& error) {
             // Windows (libc++ on Win32 threads): the join can fail although the thread is fine.
             // Wait for its function to return, so nothing it uses is freed under it, then let go.
-            std::fprintf(stderr, "HLE thread: join failed (%s); waiting for it to finish\n", error.what());
-            if (thread.get_id() != std::this_thread::get_id()) {
-                for (int waited = 0; finished && !finished->load() && waited < 5000; ++waited) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            if (!finished || !finished->load()) {
+                std::fprintf(stderr, "HLE thread: join failed (%s); waiting for it to finish\n", error.what());
+                if (thread.get_id() != std::this_thread::get_id()) {
+                    for (int waited = 0; finished && !finished->load() && waited < 5000; ++waited) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    }
                 }
             }
             if (thread.joinable()) thread.detach();

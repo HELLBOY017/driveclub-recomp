@@ -739,6 +739,31 @@ bool DriveAA::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool dlss) {
     return true;
 }
 
+void DriveAA::Prewarm(u32 ow, u32 oh) {
+    if (ready || !Active() || ow == 0 || oh == 0) {
+        return;
+    }
+    const bool want_dlss = BbSettings::Get().aa_mode == BbSettings::AaDlss;
+    const u32 w = ow;
+    const u32 h = oh;
+    if (!EnsureResources(w, h, ow, oh, want_dlss)) {
+        return;
+    }
+    if (want_dlss) {
+        Dlss* dlss = Dlss::Get();
+        if (dlss && dlss->Available()) {
+            const Dlss::FeatureDesc dlss_desc{w, h, ow, oh, 0, true, true,
+                                              u32(BbSettings::Get().dlss_model.load())};
+            if (!dlss->HasFeature(dlss_desc)) {
+                scheduler.EndRendering();
+                const auto cmdbuf = scheduler.CommandBuffer();
+                dlss->CreateFeature(cmdbuf, dlss_desc);
+                reset = true;
+            }
+        }
+    }
+}
+
 void DriveAA::OnTaa(VideoCore::ImageId color_id, VideoCore::ImageId depth_id,
                     VideoCore::ImageId output_id, VideoCore::ImageId gbuffer_id,
                     const DcInputs* dc_inputs) {
@@ -901,7 +926,9 @@ void DriveAA::Reconstruct(VideoCore::ImageId color_id, VideoCore::ImageId depth_
                                       u32(BbSettings::Get().dlss_model.load())};
     const bool new_feature = dlss && !dlss->HasFeature(dlss_desc);
     if (new_feature) {
-        scheduler.Finish();
+        if (dlss->HasAnyFeature()) {
+            scheduler.Finish();
+        }
         dlss->ReleaseFeature();
     }
 

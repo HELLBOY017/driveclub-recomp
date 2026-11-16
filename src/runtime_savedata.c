@@ -158,8 +158,25 @@ static int32_t mount(int32_t user, const char *title, const DirName *dir, uint32
     root(user,title,base,sizeof(base));
     snprintf(host,sizeof(host),"%s/%s",base,dir->data);
     snprintf(meta,sizeof(meta),"%s/%s.sce_sys",base,dir->data);
-    struct stat st;
-    int exists=!stat(host,&st) && S_ISDIR(st.st_mode);
+    static char known_existing[16][640];
+    static int known_existing_count;
+    int exists = 0;
+    pthread_mutex_lock(&lock);
+    for (int i = 0; i < known_existing_count; ++i) {
+        if (!strcmp(known_existing[i], host)) { exists = 1; break; }
+    }
+    pthread_mutex_unlock(&lock);
+    if (!exists) {
+        struct stat st;
+        exists = !stat(host, &st) && S_ISDIR(st.st_mode);
+        if (exists) {
+            pthread_mutex_lock(&lock);
+            if (known_existing_count < 16) {
+                snprintf(known_existing[known_existing_count++], sizeof(known_existing[0]), "%s", host);
+            }
+            pthread_mutex_unlock(&lock);
+        }
+    }
     if ((mode & MODE_CREATE) && exists) return ERR_EXISTS;
     if (!(mode & (MODE_CREATE|MODE_CREATE2)) && !exists) return ERR_NOT_FOUND;
     pthread_mutex_lock(&lock);
@@ -183,8 +200,11 @@ static int32_t mount(int32_t user, const char *title, const DirName *dir, uint32
     runtime_file_mount(result->point.data,host);
     ++mounts_done;
     pthread_mutex_unlock(&lock);
-    printf("Runtime: save data '%s' mounted at %s (%s%s)\n",dir->data,result->point.data,
-           exists ? "existing" : "created",(mode & MODE_RDONLY) ? ", read-only" : "");
+    static unsigned logged_mounts;
+    if (logged_mounts++ < 24 || !exists) {
+        printf("Runtime: save data '%s' mounted at %s (%s%s)\n",dir->data,result->point.data,
+               exists ? "existing" : "created",(mode & MODE_RDONLY) ? ", read-only" : "");
+    }
     return 0;
 }
 static ABI int32_t save_mount(const Mount1 *m, MountResult *result) {
