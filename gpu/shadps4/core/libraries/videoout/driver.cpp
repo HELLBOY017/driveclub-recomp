@@ -959,12 +959,11 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     // (now - period: after a late frame the next one, and even a second, goes out at once:
     // a long frame followed by a short one); 0 keeps every release at least one period after
     // the one before (minimum spacing: a late frame only delays, it is never repaid).
-    // Default 75 (75% period credit): absorbs single-frame transient spikes (camera cuts,
+    // Default 100 (100% period credit): absorbs transient spikes (camera cuts,
     // countdown audio, texture loads) so they catch back up to the 60 Hz display refresh cadence
-    // instead of stretching into consecutive hitched frames, while still enforcing at least 25%
-    // period spacing to prevent frame bunching.
+    // immediately without stretching into consecutive hitched frames or bunching frames.
     const long credit_pct =
-        std::clamp<long>(EmulatorSettingsImpl::Number("BB_PACE_CREDIT", 75), 0, 200);
+        std::clamp<long>(EmulatorSettingsImpl::Number("BB_PACE_CREDIT", 100), 0, 200);
     auto credit = frame_period * credit_pct / 100;
     // Off the old rule the waits for a slot use the precise sleep: a release that wakes late
     // would otherwise come out short of its period.

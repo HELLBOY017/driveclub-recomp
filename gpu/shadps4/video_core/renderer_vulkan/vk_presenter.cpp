@@ -26,6 +26,7 @@
 #include "bbport_overlay.h"
 #include "bbport_neural_settings.h"
 #include "bbport_settings.h"
+#include "bbport_intro_pacing.h"
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
@@ -962,7 +963,7 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     // timing) came in bursts: 12.5/25 ms alternation at 80 FPS. 0 turns it off.
     static const u32 frames_ahead = [] {
         const char* env = std::getenv("BB_FRAMES_AHEAD");
-        return env ? u32(std::max(0, std::atoi(env))) : 2u;
+        return env ? u32(std::max(0, std::atoi(env))) : 3u;
     }();
     s64 ahead_start = 0, ahead_end = 0;
     if (frames_ahead) {
@@ -1143,7 +1144,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     // spaced sequence on the panel.
     // The source must be complete on the GPU before its images are spaced out.
     const auto source_began = std::chrono::steady_clock::now();
-    if (generated && frame->source_scheduler) {
+    if ((generated || BbIntroPacing::IsVideoPlaying()) && frame->source_scheduler) {
         frame->source_scheduler->Wait(frame->ready_tick);
     }
     const auto paced = std::chrono::steady_clock::now();

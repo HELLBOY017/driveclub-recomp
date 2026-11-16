@@ -104,7 +104,8 @@ static void log_missing(const char *guest) {
     for (int i=0;i<count;++i) if (seen[i]==h) { known=1; break; }
     if (!known && count<512) seen[count++]=h;
     __sync_lock_release(&busy);
-    if (!known) printf("Runtime: open(%s) -> not found\n",guest);
+    static int logged_missing = 0;
+    if (!known && ++logged_missing <= 30) printf("Runtime: open(%s) -> not found\n",guest);
     /* gameNNN.dat are the archive volumes: a missing one means an incomplete dump and a crash soon after. */
     if (!known && !strncmp(guest,"/app0/game",10) && guest[10]>='0' && guest[10]<='9' && strstr(guest,".dat"))
         printf("Runtime: WARNING archive volume %s is missing from the game folders (incomplete dump?)\n",guest+6);

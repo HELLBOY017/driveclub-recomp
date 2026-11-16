@@ -405,7 +405,6 @@ static ABI int32_t system_event(void *event) {
     return 0;
 }
 static ABI int32_t hide_splash(void) {
-    bbgpu_mark_startup_done();
     note("SystemService: splash screen hidden");
     return 0;
 }

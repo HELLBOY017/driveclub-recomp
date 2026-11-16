@@ -14,6 +14,10 @@ inline void MarkStartupDone() {
     startup_done.store(true, std::memory_order_relaxed);
 }
 
+inline bool IsVideoPlaying() {
+    return players.load(std::memory_order_relaxed) > 0;
+}
+
 inline bool IsIntro(std::string_view path) {
     if (startup_done.load(std::memory_order_relaxed)) return false;
     const auto slash = path.find_last_of("/\\");
