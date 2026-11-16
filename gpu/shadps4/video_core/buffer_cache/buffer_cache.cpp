@@ -1433,8 +1433,9 @@ void BufferCache::GuardWholeArena(const Buffer* arena) {
         return;
     }
     auto* binds = BindsForArena(arena);
-    binds->binds.reserve(binds->binds.size() + arena->SizeBytes() / block_size);
-    for (u64 offset = 0; offset < arena->SizeBytes(); offset += block_size) {
+    const u64 guard_size = std::min<u64>(arena->SizeBytes(), 8ULL * 1024 * 1024 * 1024);
+    binds->binds.reserve(binds->binds.size() + guard_size / block_size);
+    for (u64 offset = 0; offset < guard_size; offset += block_size) {
         binds->binds.push_back(vk::SparseMemoryBind{
             .resourceOffset = offset,
             .size = block_size,

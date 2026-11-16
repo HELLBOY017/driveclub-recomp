@@ -266,7 +266,7 @@ void DataBase::Load(BlobType type, const std::string& name, std::vector<u32>& da
     return LoadVector(type, path, data);
 }
 
-void DataBase::ForEachBlob(BlobType type, const std::function<void(std::vector<u8>&& data)>& func) {
+void DataBase::ForEachBlob(BlobType type, const std::function<bool(std::vector<u8>&& data)>& func) {
     const auto& ext = GetBlobFileExtension(type);
     if (EmulatorSettings.IsPipelineCacheArchived()) {
         const auto num_files = mz_zip_reader_get_num_files(&zip_ar);
@@ -283,6 +283,7 @@ void DataBase::ForEachBlob(BlobType type, const std::function<void(std::vector<u
             }
         }
     } else {
+        std::vector<std::filesystem::path> to_delete;
         for (const auto& file_name : std::filesystem::directory_iterator{cache_path}) {
             if (file_name.path().extension().string().ends_with(ext)) {
                 using namespace Common::FS;
@@ -290,9 +291,15 @@ void DataBase::ForEachBlob(BlobType type, const std::function<void(std::vector<u
                 if (file.IsOpen()) {
                     std::vector<u8> data(file.GetSize());
                     file.Read(data);
-                    func(std::move(data));
+                    if (!func(std::move(data))) {
+                        to_delete.push_back(file_name.path());
+                    }
                 }
             }
+        }
+        for (const auto& path : to_delete) {
+            std::error_code ec;
+            std::filesystem::remove(path, ec);
         }
     }
 }

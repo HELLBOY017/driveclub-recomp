@@ -43,9 +43,10 @@ class PageManager;
 
 class BufferCache {
     static constexpr u64 ADDRESS_SPACE_BITS = 40;
-    // bbport: arena pages are 4 GiB unless the driver's buffer size limit is lower (AMD's
-    // Windows driver: 2 GiB); an arena spans up to two pages, so they shrink to half the limit.
-    static constexpr u64 MAX_ARENA_PAGE_BITS = 32;
+    // bbport: arena pages are 16 GiB unless the driver's buffer size limit is lower (AMD's
+    // Windows driver: 2 GiB); 16 GiB encompasses the entire guest direct memory heap (7.5 GiB)
+    // without crossing arena page boundaries, eliminating arena migration stalls at race start.
+    static constexpr u64 MAX_ARENA_PAGE_BITS = 34;
     static constexpr u64 MIN_ARENA_PAGE_BITS = 30;
     static constexpr u64 MAX_ARENA_PAGES = u64{1} << (ADDRESS_SPACE_BITS - MIN_ARENA_PAGE_BITS);
     static constexpr u64 MIN_BLOCK_SIZE = 16_KB;

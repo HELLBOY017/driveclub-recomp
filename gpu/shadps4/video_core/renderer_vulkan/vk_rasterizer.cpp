@@ -3043,16 +3043,17 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                             const u64 required = tiles * 100; // count + up to 24 volume IDs
                             if (required > size) {
                                 auto& replacement = lighting_lists[vsharp.base_address];
-                                if (list_writer && (!replacement || replacement->SizeBytes() < required)) {
+                                const u64 target_size = std::max<u64>(required, 4ULL * 1024 * 1024);
+                                if (list_writer && (!replacement || replacement->SizeBytes() < target_size)) {
                                     if (replacement) {
                                         scheduler.DeferOperation([old = std::move(replacement)] {});
                                     }
                                     replacement = std::make_unique<VideoCore::Buffer>(
-                                        instance, 0, required, VideoCore::MemoryType::DeviceLocal,
+                                        instance, 0, target_size, VideoCore::MemoryType::DeviceLocal,
                                         "DriveClub expanded lighting tile list");
                                     LOG_WARNING(Render_Vulkan,
                                                 "DriveClub culling: resized host tile list {} -> {} bytes ({}x{})",
-                                                size, required, w, h);
+                                                size, target_size, w, h);
                                 }
                                 if (replacement && replacement->SizeBytes() >= required) {
                                     buffer = replacement.get();

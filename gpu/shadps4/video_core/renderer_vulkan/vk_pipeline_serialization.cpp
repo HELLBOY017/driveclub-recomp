@@ -408,7 +408,7 @@ void PipelineCache::WarmUp() {
     u32 num_total_pipelines{};
 
     Storage::DataBase::Instance().ForEachBlob(
-        Storage::BlobType::PipelineKey, [&](std::vector<u8>&& data) {
+        Storage::BlobType::PipelineKey, [&](std::vector<u8>&& data) -> bool {
             ++num_total_pipelines;
 
             Serialization::Archive ar{std::move(data)};
@@ -417,7 +417,7 @@ void PipelineCache::WarmUp() {
             u32 version{};
             pldata.Read(version);
             if (version != Serialization::PipelineKeyVersion) {
-                return;
+                return false;
             }
 
             u32 is_compute{};
@@ -433,6 +433,7 @@ void PipelineCache::WarmUp() {
             if (result) {
                 ++num_pipelines;
             }
+            return result;
         });
 
     LOG_INFO(Render, "Preloaded {} pipelines", num_pipelines);
