@@ -174,19 +174,19 @@ static int ro_fd_cache_count;
 
 #ifdef _WIN32
 typedef struct {
-    char guest_path[64];
+    char guest_path[256];
     HANDLE handle;
 } MasterArchiveHandle;
-#define MASTER_ARCHIVE_MAX 64
+#define MASTER_ARCHIVE_MAX 128
 static MasterArchiveHandle master_archives[MASTER_ARCHIVE_MAX];
 static int master_archive_count;
 #endif
 
 typedef struct {
-    char guest[64];
+    char guest[256];
     char host[1024];
 } ResolvedPathEntry;
-#define RESOLVED_PATH_MAX 64
+#define RESOLVED_PATH_MAX 256
 static ResolvedPathEntry resolved_paths[RESOLVED_PATH_MAX];
 static int resolved_path_count;
 
@@ -284,7 +284,7 @@ static int translate(const char *guest,char *out,size_t size) {
         if ((p==buffer || p[-1]=='/') && (p[2]==0 || p[2]=='/')) return EACCES;
     if (runtime_benchmark_marker(buffer)) return ENOENT; /* benchmark mode progress (runtime_benchmark.c) */
 
-    if (!strncmp(buffer, "/app0/game", 10) && strstr(buffer, ".dat")) {
+    if (!strncmp(buffer, "/app0/", 6)) {
         pthread_mutex_lock(&lock);
         for (int i = 0; i < resolved_path_count; ++i) {
             if (!strcmp(resolved_paths[i].guest, buffer)) {
@@ -333,8 +333,14 @@ static int translate(const char *guest,char *out,size_t size) {
             char alt[1024];
             if ((size_t)snprintf(alt,sizeof(alt),"%s%s",mods_dirs[i],buffer+5)<sizeof(alt) && access(alt,F_OK)==0) {
                 static unsigned used;
-                if (used++<40) printf("Runtime: replaced by mods folder: %s\n",buffer);
+                if (used++<10) printf("Runtime: replaced by mods folder: %s\n",buffer);
                 snprintf(out,size,"%s",alt);
+                if (resolved_path_count < RESOLVED_PATH_MAX && strlen(buffer) < sizeof(resolved_paths[0].guest)) {
+                    snprintf(resolved_paths[resolved_path_count].guest,
+                             sizeof(resolved_paths[0].guest), "%s", buffer);
+                    snprintf(resolved_paths[resolved_path_count++].host,
+                             sizeof(resolved_paths[0].host), "%s", out);
+                }
                 pthread_mutex_unlock(&lock);
                 return 0;
             }
@@ -347,7 +353,7 @@ static int translate(const char *guest,char *out,size_t size) {
             snprintf(out,size,"%s",alt);
     }
     if (!result && resolved_path_count < RESOLVED_PATH_MAX &&
-        !strncmp(buffer, "/app0/game", 10) && strstr(buffer, ".dat")) {
+        !strncmp(buffer, "/app0/", 6) && strlen(buffer) < sizeof(resolved_paths[0].guest)) {
         int exists = 0;
         for (int i = 0; i < resolved_path_count; ++i) {
             if (!strcmp(resolved_paths[i].guest, buffer)) { exists = 1; break; }
@@ -565,7 +571,8 @@ static int64_t do_open(const char *guest,int flags,int mode) {
     pthread_mutex_lock(&lock);
 #ifdef _WIN32
     if (host >= 0 && is_ro_game && master_archive_count < MASTER_ARCHIVE_MAX &&
-        !strncmp(guest, "/app0/game", 10) && strstr(guest, ".dat")) {
+        !strncmp(guest, "/app0/", 6) && (strstr(guest, ".dat") || strstr(guest, ".rpk")) &&
+        strlen(guest) < sizeof(master_archives[0].guest_path)) {
         int exists = 0;
         for (int i = 0; i < master_archive_count; ++i) {
             if (!strcmp(master_archives[i].guest_path, guest)) { exists = 1; break; }

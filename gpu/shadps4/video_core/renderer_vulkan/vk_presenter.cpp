@@ -630,10 +630,12 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
         {
             // Print Screen saves a screenshot (SaveScreenshot), while a window of this game is in front.
             const bool prtsc = (GetAsyncKeyState(VK_SNAPSHOT) & 0x8000) != 0;
-            DWORD focus_pid = 0;
-            GetWindowThreadProcessId(GetForegroundWindow(), &focus_pid);
-            if (prtsc && !prtsc_down && focus_pid == GetCurrentProcessId()) {
-                g_screenshot_requested = true;
+            if (prtsc && !prtsc_down) {
+                DWORD focus_pid = 0;
+                GetWindowThreadProcessId(GetForegroundWindow(), &focus_pid);
+                if (focus_pid == GetCurrentProcessId()) {
+                    g_screenshot_requested = true;
+                }
             }
             prtsc_down = prtsc;
         }
