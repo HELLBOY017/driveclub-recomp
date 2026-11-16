@@ -516,20 +516,22 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
             cache_image.info.resources.levels == 1 && image_info.resources.layers == 1 &&
             cache_image.info.resources.layers == 1;
 
+        // Size and resources are greater, expand the image.
+        if (image_info.type == cache_image.info.type &&
+            image_info.tile_mode == cache_image.info.tile_mode &&
+            !cache_image.info.resources.Covers(image_info.resources)) {
+            return {ExpandImage(image_info, cache_image_id), -1, -1};
+        }
+
         // Size and resources are less than or equal, use image view.
-        if (image_info.pixel_format != cache_image.info.pixel_format ||
-            image_info.guest_size <= cache_image.info.guest_size || pow2_padding_only) {
+        if (cache_image.info.resources.Covers(image_info.resources) &&
+            (image_info.pixel_format != cache_image.info.pixel_format ||
+             image_info.guest_size <= cache_image.info.guest_size || pow2_padding_only)) {
             auto result_id = merged_image_id ? merged_image_id : cache_image_id;
             const auto& result_image = slot_images[result_id];
             const bool is_compatible =
                 IsVulkanFormatCompatible(result_image.info.pixel_format, image_info.pixel_format);
             return {is_compatible ? result_id : ImageId{}, -1, -1};
-        }
-
-        // Size and resources are greater, expand the image.
-        if (image_info.type == cache_image.info.type &&
-            !cache_image.info.resources.Covers(image_info.resources)) {
-            return {ExpandImage(image_info, cache_image_id), -1, -1};
         }
 
         // Size is greater but resources are not, because the tiling mode is different.
@@ -714,7 +716,10 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
 
 ImageId TextureCache::ExpandImage(const ImageInfo& info_ref, ImageId image_id) {
     // `info_ref` may live inside a slot image: inserting can move the storage, so work on a copy.
-    const ImageInfo info = info_ref;
+    ImageInfo info = info_ref;
+    const auto& old_image = slot_images[image_id];
+    info.resources = old_image.info.resources.CombinedMax(info_ref.resources);
+    info.UpdateSize();
     if constexpr (BB_DIAGNOSTICS) BbStats::image_creates[1].fetch_add(1, std::memory_order_relaxed);
     if (info.size.width == 768 && info.size.height == 512) {
         if constexpr (BB_DIAGNOSTICS) BbStats::mirror_img_created[1].fetch_add(1, std::memory_order_relaxed);
@@ -725,6 +730,11 @@ ImageId TextureCache::ExpandImage(const ImageInfo& info_ref, ImageId image_id) {
 
     auto& src_image = slot_images[image_id];
     auto& new_image = slot_images[new_image_id];
+    new_image.usage.texture |= src_image.usage.texture;
+    new_image.usage.storage |= src_image.usage.storage;
+    new_image.usage.render_target |= src_image.usage.render_target;
+    new_image.usage.depth_target |= src_image.usage.depth_target;
+    new_image.usage.vo_surface |= src_image.usage.vo_surface;
 
     RefreshImage(new_image);
     runtime.CopyImage(&src_image, &new_image);
@@ -840,10 +850,15 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
             // Cannot reuse this image as we need the exact requested format.
             image_id = {};
         } else if (!image_resolved.info.resources.Covers(info.resources)) {
-            // The image was clearly picked up wrong.
-            FreeImage(image_id);
-            image_id = {};
-            LOG_WARNING(Render_Vulkan, "Image overlap resolve failed");
+            if (image_resolved.info.type == info.type &&
+                image_resolved.info.tile_mode == info.tile_mode) {
+                image_id = ExpandImage(info, image_id);
+                view_mip = -1;
+                view_slice = -1;
+            } else {
+                image_id = {};
+                LOG_WARNING(Render_Vulkan, "Image overlap resolve failed: shape mismatch");
+            }
         }
     }
     // Create and register a new image
