@@ -305,7 +305,7 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
     const bool bpp_match = requested_info.num_bits == cache_image.info.num_bits;
 
     // If an image in the cache has less slices we need to expand it
-    bool recreate = cache_image.info.resources < requested_info.resources;
+    bool recreate = !cache_image.info.resources.Covers(requested_info.resources);
 
     switch (binding) {
     case BindingType::Texture:
@@ -343,7 +343,7 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
         const bool from_depth = cache_image.info.props.is_depth;
         const VAddr stats_address = cache_image.info.guest_address;
         auto new_info = requested_info;
-        new_info.resources = std::max(requested_info.resources, cache_image.info.resources);
+        new_info.resources = cache_image.info.resources.CombinedMax(requested_info.resources);
         new_info.UpdateSize();
         if constexpr (BB_DIAGNOSTICS) BbStats::image_creates[0].fetch_add(1, std::memory_order_relaxed);
         if (new_info.size.width == 768 && new_info.size.height == 512) {
@@ -528,7 +528,7 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
 
         // Size and resources are greater, expand the image.
         if (image_info.type == cache_image.info.type &&
-            image_info.resources > cache_image.info.resources) {
+            !cache_image.info.resources.Covers(image_info.resources)) {
             return {ExpandImage(image_info, cache_image_id), -1, -1};
         }
 
@@ -808,6 +808,9 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         if (exact_fmt && info.pixel_format != cache_image.info.pixel_format) {
             continue;
         }
+        if (!cache_image.info.resources.Covers(info.resources)) {
+            continue;
+        }
         image_id = cache_id;
     }
 
@@ -836,7 +839,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         if (exact_fmt && info.pixel_format != image_resolved.info.pixel_format) {
             // Cannot reuse this image as we need the exact requested format.
             image_id = {};
-        } else if (image_resolved.info.resources < info.resources) {
+        } else if (!image_resolved.info.resources.Covers(info.resources)) {
             // The image was clearly picked up wrong.
             FreeImage(image_id);
             image_id = {};

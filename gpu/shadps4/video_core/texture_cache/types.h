@@ -64,6 +64,14 @@ struct SubresourceExtent {
     u32 layers = 1;
 
     auto operator<=>(const SubresourceExtent&) const = default;
+
+    constexpr bool Covers(const SubresourceExtent& other) const noexcept {
+        return levels >= other.levels && layers >= other.layers;
+    }
+
+    constexpr SubresourceExtent CombinedMax(const SubresourceExtent& other) const noexcept {
+        return {std::max(levels, other.levels), std::max(layers, other.layers)};
+    }
 };
 
 struct SubresourceRange {

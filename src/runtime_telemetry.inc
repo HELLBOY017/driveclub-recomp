@@ -230,9 +230,15 @@ static void tele_triggers(const uint8_t *state, float speed) {
     }
 
     const char *name = SDL_GetGamepadName(g);
-    const bool has_trigger_rumble = (type == SDL_GAMEPAD_TYPE_XBOXONE) ||
-        SDL_GetBooleanProperty(SDL_GetGamepadProperties(g), SDL_PROP_GAMEPAD_CAP_TRIGGER_RUMBLE_BOOLEAN, false) ||
-        (name && (strstr(name, "Xbox One") || strstr(name, "Xbox Series") || strstr(name, "Xbox Elite")));
+    static SDL_Gamepad *cached_g = NULL;
+    static bool cached_trigger_rumble = false;
+    if (g != cached_g) {
+        cached_g = g;
+        cached_trigger_rumble = (type == SDL_GAMEPAD_TYPE_XBOXONE) ||
+            SDL_GetBooleanProperty(SDL_GetGamepadProperties(g), SDL_PROP_GAMEPAD_CAP_TRIGGER_RUMBLE_BOOLEAN, false) ||
+            (name && (strstr(name, "Xbox One") || strstr(name, "Xbox Series") || strstr(name, "Xbox Elite")));
+    }
+    const bool has_trigger_rumble = cached_trigger_rumble;
 
     if (has_trigger_rumble) {
         static bool xbox_logged;

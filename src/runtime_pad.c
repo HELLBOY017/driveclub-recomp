@@ -345,7 +345,9 @@ static void sample_buttons(PadData *d) {
             static uint32_t last_buttons=~0u; static uint8_t last_axes[4]; static unsigned logged;
             if (logged<200 && (d->buttons!=last_buttons || abs(d->left_x-last_axes[0])>40 || abs(d->left_y-last_axes[1])>40)) {
                 ++logged; last_buttons=d->buttons; last_axes[0]=d->left_x; last_axes[1]=d->left_y;
-                printf("Runtime: gamepad input: buttons 0x%x left %u,%u triggers %u,%u\n",d->buttons,d->left_x,d->left_y,d->l2,d->r2);
+                static int trace = -1;
+                if (trace < 0) { const char *e = getenv("BB_PAD_TRACE"); trace = (e && e[0] == '1') ? 1 : 0; }
+                if (trace) printf("Runtime: gamepad input: buttons 0x%x left %u,%u triggers %u,%u\n",d->buttons,d->left_x,d->left_y,d->l2,d->r2);
             }
         }
     }
@@ -1190,7 +1192,12 @@ static void camera_fov_apply(void) {}
 static ABI int32_t pad_read_state(int32_t handle, PadData *data) {
     if (!handle_ok(handle)) return ERR_INVALID_HANDLE;
     if (!data) return ERR_INVALID_ARG;
-    runtime_exit_tick();
+    static uint64_t last_exit_tick;
+    const uint64_t now_tick = now_us();
+    if (now_tick - last_exit_tick >= 100000 || runtime_exit_captures()) {
+        last_exit_tick = now_tick;
+        runtime_exit_tick();
+    }
     bbgpu_reflex_pre_input_sample();
     pthread_mutex_lock(&lock);
     sample(data); ++reads;
@@ -1200,7 +1207,7 @@ static ABI int32_t pad_read_state(int32_t handle, PadData *data) {
 #ifdef _WIN32
     { static int armed; if (data->buttons && !armed && BB_DIAGNOSTIC_ENV("DR_WATCH")) { armed=1; watch_install(data); } }
 #endif
-    { static unsigned nz; if (data->buttons && nz++<40) printf("Runtime: game read buttons 0x%x at %p from +0x%llx\n",data->buttons,(void *)data,(unsigned long long)((uintptr_t)__builtin_return_address(0)-runtime_image_base)); }
+    { static unsigned nz; static int trace = -1; if (trace < 0) { const char *e = getenv("BB_PAD_TRACE"); trace = (e && e[0] == '1') ? 1 : 0; } if (trace && data->buttons && nz++<40) printf("Runtime: game read buttons 0x%x at %p from +0x%llx\n",data->buttons,(void *)data,(unsigned long long)((uintptr_t)__builtin_return_address(0)-runtime_image_base)); }
     pthread_mutex_unlock(&lock);
     game_options_apply();   /* the game's thread, outside the lock: the setters tell the rest of the game */
     camera_fov_apply();
