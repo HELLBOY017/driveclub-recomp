@@ -241,6 +241,11 @@ BufferCache::~BufferCache() {
     if (guard_memory) {
         instance.GetDevice().freeMemory(guard_memory);
     }
+    for (const auto& slab : arena_slabs) {
+        if (slab.memory) {
+            instance.GetDevice().freeMemory(slab.memory);
+        }
+    }
 }
 
 void BufferCache::InvalidateMemory(VAddr device_addr, u64 size, bool assume_locks) {
@@ -1518,41 +1523,125 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
     // device address flag. Without it a driver is free to keep that memory out of its address space, and AMD
     // cards then fault on reads inside the arena.
     const vk::MemoryAllocateFlagsInfo addressable = {.flags = vk::MemoryAllocateFlagBits::eDeviceAddress};
-    const vk::MemoryAllocateInfo alloc_info = {
-        .pNext = &addressable,
-        .allocationSize = resident_blocks << block_shift,
-        .memoryTypeIndex = arena_memory_type_index,
-    };
-    auto alloc = instance.GetDevice().allocateMemory(alloc_info);
-    if (alloc.result == vk::Result::eErrorOutOfDeviceMemory && spill_memory_type_index != ~0u) {
-        static std::atomic<bool> told{false};
-        if (!told.exchange(true)) {
-            std::printf("GPU: the card's memory is full, buffer data goes to system memory. "
-                        "The frame rate drops instead of the game ending.\n");
-            std::fflush(stdout);
-        }
-        alloc = instance.GetDevice().allocateMemory({.pNext = &addressable,
-                                                    .allocationSize = alloc_info.allocationSize,
-                                                    .memoryTypeIndex = spill_memory_type_index});
-    }
-    if (alloc.result != vk::Result::eSuccess) {
-        // Out of room in system memory too. Leaving these pages unbound shows wrong pixels where the
-        // game reads them; stopping the port is what the assert here used to do.
-        static std::atomic<u32> failed{0};
-        const u32 n = failed.fetch_add(1) + 1;
-        if (n <= 3 || n % 512 == 0) {
-            LOG_WARNING(Render_Vulkan,
-                        "No memory for {} bytes of buffer data ({} failures so far); the pages stay empty",
-                        alloc_info.allocationSize, n);
-        }
-        return;
-    }
-    const vk::DeviceMemory device_memory = *alloc;
+    const u64 needed_bytes = static_cast<u64>(resident_blocks) << block_shift;
+
+    vk::DeviceMemory device_memory{};
     u8* mapped_base = nullptr;
-    if (arena_host_visible) {
-        const auto mapping = instance.GetDevice().mapMemory(device_memory, 0, vk::WholeSize);
-        if (mapping.result == vk::Result::eSuccess) {
-            mapped_base = static_cast<u8*>(mapping.value);
+    u64 slab_offset = 0;
+
+    if (needed_bytes >= ARENA_SLAB_SIZE) {
+        const vk::MemoryAllocateInfo alloc_info = {
+            .pNext = &addressable,
+            .allocationSize = needed_bytes,
+            .memoryTypeIndex = arena_memory_type_index,
+        };
+        auto alloc = instance.GetDevice().allocateMemory(alloc_info);
+        if (alloc.result == vk::Result::eErrorOutOfDeviceMemory && spill_memory_type_index != ~0u) {
+            static std::atomic<bool> told{false};
+            if (!told.exchange(true)) {
+                std::printf("GPU: the card's memory is full, buffer data goes to system memory. "
+                            "The frame rate drops instead of the game ending.\n");
+                std::fflush(stdout);
+            }
+            alloc = instance.GetDevice().allocateMemory({.pNext = &addressable,
+                                                         .allocationSize = alloc_info.allocationSize,
+                                                         .memoryTypeIndex = spill_memory_type_index});
+        }
+        if (alloc.result != vk::Result::eSuccess) {
+            static std::atomic<u32> failed{0};
+            const u32 n = failed.fetch_add(1) + 1;
+            if (n <= 3 || n % 512 == 0) {
+                LOG_WARNING(Render_Vulkan,
+                            "No memory for {} bytes of buffer data ({} failures so far); the pages stay empty",
+                            alloc_info.allocationSize, n);
+            }
+            return;
+        }
+        device_memory = *alloc;
+        if (arena_host_visible) {
+            const auto mapping = instance.GetDevice().mapMemory(device_memory, 0, vk::WholeSize);
+            if (mapping.result == vk::Result::eSuccess) {
+                mapped_base = static_cast<u8*>(mapping.value);
+            }
+        }
+        arena_slabs.push_back(ArenaSlab{
+            .memory = device_memory,
+            .size = needed_bytes,
+            .used = needed_bytes,
+            .mapped_base = mapped_base,
+        });
+        slab_offset = 0;
+    } else {
+        if (!current_slab.memory || current_slab.used + needed_bytes > current_slab.size) {
+            const vk::MemoryAllocateInfo alloc_info = {
+                .pNext = &addressable,
+                .allocationSize = ARENA_SLAB_SIZE,
+                .memoryTypeIndex = arena_memory_type_index,
+            };
+            auto alloc = instance.GetDevice().allocateMemory(alloc_info);
+            if (alloc.result == vk::Result::eErrorOutOfDeviceMemory && spill_memory_type_index != ~0u) {
+                alloc = instance.GetDevice().allocateMemory({.pNext = &addressable,
+                                                             .allocationSize = alloc_info.allocationSize,
+                                                             .memoryTypeIndex = spill_memory_type_index});
+            }
+            if (alloc.result != vk::Result::eSuccess) {
+                const vk::MemoryAllocateInfo exact_info = {
+                    .pNext = &addressable,
+                    .allocationSize = needed_bytes,
+                    .memoryTypeIndex = arena_memory_type_index,
+                };
+                alloc = instance.GetDevice().allocateMemory(exact_info);
+                if (alloc.result == vk::Result::eErrorOutOfDeviceMemory && spill_memory_type_index != ~0u) {
+                    alloc = instance.GetDevice().allocateMemory({.pNext = &addressable,
+                                                                 .allocationSize = needed_bytes,
+                                                                 .memoryTypeIndex = spill_memory_type_index});
+                }
+                if (alloc.result != vk::Result::eSuccess) {
+                    static std::atomic<u32> failed{0};
+                    const u32 n = failed.fetch_add(1) + 1;
+                    if (n <= 3 || n % 512 == 0) {
+                        LOG_WARNING(Render_Vulkan,
+                                    "No memory for {} bytes of buffer data ({} failures so far); the pages stay empty",
+                                    needed_bytes, n);
+                    }
+                    return;
+                }
+                device_memory = *alloc;
+                if (arena_host_visible) {
+                    const auto mapping = instance.GetDevice().mapMemory(device_memory, 0, vk::WholeSize);
+                    if (mapping.result == vk::Result::eSuccess) {
+                        mapped_base = static_cast<u8*>(mapping.value);
+                    }
+                }
+                arena_slabs.push_back(ArenaSlab{
+                    .memory = device_memory,
+                    .size = needed_bytes,
+                    .used = needed_bytes,
+                    .mapped_base = mapped_base,
+                });
+                slab_offset = 0;
+            } else {
+                device_memory = *alloc;
+                if (arena_host_visible) {
+                    const auto mapping = instance.GetDevice().mapMemory(device_memory, 0, vk::WholeSize);
+                    if (mapping.result == vk::Result::eSuccess) {
+                        mapped_base = static_cast<u8*>(mapping.value);
+                    }
+                }
+                current_slab = ArenaSlab{
+                    .memory = device_memory,
+                    .size = ARENA_SLAB_SIZE,
+                    .used = needed_bytes,
+                    .mapped_base = mapped_base,
+                };
+                arena_slabs.push_back(current_slab);
+                slab_offset = 0;
+            }
+        } else {
+            device_memory = current_slab.memory;
+            mapped_base = current_slab.mapped_base;
+            slab_offset = current_slab.used;
+            current_slab.used += needed_bytes;
         }
     }
 
@@ -1569,22 +1658,33 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
         backing.start = range.start;
         backing.end = range.end;
         backing.memory = device_memory;
-        backing.offset = memory_offset >> block_shift; // in blocks, like start and end (Backing::SubRange)
+        backing.offset = (slab_offset + memory_offset) >> block_shift; // in blocks, like start and end (Backing::SubRange)
         backing.base = mapped_base;
         resident_ranges.Add(backing);
 
         LOG_INFO(Render, "Making range start={}, end={} resident", backing.start, backing.end);
 
-        const auto& bind = binds->binds.emplace_back(vk::SparseMemoryBind{
-            .resourceOffset = (range.start << block_shift) - arena->cpu_addr,
-            .size = (range.end - range.start) << block_shift,
-            .memory = device_memory,
-            .memoryOffset = memory_offset,
-        });
-        memory_offset += bind.size;
+        const u64 resource_offset = (range.start << block_shift) - arena->cpu_addr;
+        const u64 bind_size = (range.end - range.start) << block_shift;
+        const u64 bind_mem_offset = slab_offset + memory_offset;
 
-        for (u32 block = 0; block < bind.size; block += block_size) {
-            *(bda_addrs++) = arena->BufferDeviceAddress() + bind.resourceOffset + block;
+        if (!binds->binds.empty() &&
+            binds->binds.back().memory == device_memory &&
+            binds->binds.back().resourceOffset + binds->binds.back().size == resource_offset &&
+            binds->binds.back().memoryOffset + binds->binds.back().size == bind_mem_offset) {
+            binds->binds.back().size += bind_size;
+        } else {
+            binds->binds.emplace_back(vk::SparseMemoryBind{
+                .resourceOffset = resource_offset,
+                .size = bind_size,
+                .memory = device_memory,
+                .memoryOffset = bind_mem_offset,
+            });
+        }
+        memory_offset += bind_size;
+
+        for (u32 block = 0; block < bind_size; block += block_size) {
+            *(bda_addrs++) = arena->BufferDeviceAddress() + resource_offset + block;
         }
         const u64 copy_size = (backing.end - backing.start) * sizeof(vk::DeviceAddress);
         copies.emplace_back(offset, backing.start * sizeof(vk::DeviceAddress), copy_size);

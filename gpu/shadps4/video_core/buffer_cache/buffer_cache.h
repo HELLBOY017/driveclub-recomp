@@ -274,6 +274,16 @@ private:
     };
     IntervalList<Backing> resident_ranges;
 
+    struct ArenaSlab {
+        vk::DeviceMemory memory{};
+        u64 size{};
+        u64 used{};
+        u8* mapped_base{};
+    };
+    static constexpr u64 ARENA_SLAB_SIZE = 64ULL * 1024 * 1024; // 64 MiB
+    std::vector<ArenaSlab> arena_slabs;
+    ArenaSlab current_slab{};
+
     u32 arena_memory_type_index{};
     /// System memory type used when video memory is full, so a small card keeps playing slowly
     /// instead of ending. ~0u when the driver offers none.

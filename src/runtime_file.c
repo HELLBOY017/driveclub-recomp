@@ -163,9 +163,28 @@ static void miss_add(const char *key,size_t length,int kind) {
     miss_slots[i]=(MissSlot){h,(uint32_t)miss_names_size,(uint32_t)length,(uint8_t)kind};
     miss_names_size+=length; ++miss_used;
 }
+#define RO_FD_CACHE_MAX 16
+typedef struct {
+    char guest_path[512];
+    int host;
+} RoFdCacheEntry;
+static RoFdCacheEntry ro_fd_cache[RO_FD_CACHE_MAX];
+static int ro_fd_cache_count;
+
+static void ro_fd_cache_clear(void) {
+    for (int i = 0; i < ro_fd_cache_count; ++i) {
+        if (ro_fd_cache[i].host >= 0) {
+            close(ro_fd_cache[i].host);
+            ro_fd_cache[i].host = -1;
+        }
+    }
+    ro_fd_cache_count = 0;
+}
+
 static void miss_reset(void) {
     pthread_mutex_lock(&lock);
     memset(miss_slots,0,sizeof(miss_slots)); miss_names_size=miss_used=0;
+    ro_fd_cache_clear();
     pthread_mutex_unlock(&lock);
 }
 static uint64_t file_now_us(void) {
@@ -378,6 +397,48 @@ static int game_path(const char *p) {
 /* All operations return >=0 or -(host errno); wrappers adapt the convention. */
 static int64_t do_open(const char *guest,int flags,int mode) {
     if (game_path(guest) && (flags & (3|0x8|0x200|0x400|0x800))) return -EROFS;
+
+    /* Check read-only game file descriptor cache first */
+    const int is_ro_game = game_path(guest) &&
+                           !(flags & (3|0x8|0x200|0x400|0x800)) &&
+                           !(flags & 0x20000);
+    if (is_ro_game) {
+        pthread_mutex_lock(&lock);
+        int cached_host = -1;
+        for (int i = ro_fd_cache_count - 1; i >= 0; --i) {
+            if (!strcmp(ro_fd_cache[i].guest_path, guest)) {
+                cached_host = ro_fd_cache[i].host;
+                ro_fd_cache[i] = ro_fd_cache[--ro_fd_cache_count];
+                break;
+            }
+        }
+        if (cached_host >= 0) {
+            int fd = -1;
+            for (int i = 3; i < MAX_FILES; ++i) {
+                if (!files[i].used) { fd = i; break; }
+            }
+            if (fd < 0) {
+                if (ro_fd_cache_count < RO_FD_CACHE_MAX) {
+                    ro_fd_cache[ro_fd_cache_count++] = (RoFdCacheEntry){ .host = cached_host };
+                    snprintf(ro_fd_cache[ro_fd_cache_count-1].guest_path,
+                             sizeof(ro_fd_cache[0].guest_path), "%s", guest);
+                } else {
+                    close(cached_host);
+                }
+                pthread_mutex_unlock(&lock);
+                return -EMFILE;
+            }
+            host_lseek(cached_host, 0, SEEK_SET);
+            files[fd] = (File){.used = 1, .host = cached_host, .dir = NULL};
+            snprintf(files[fd].path, sizeof(files[fd].path), "%s", guest);
+            ++opens;
+            pthread_mutex_unlock(&lock);
+            if (opens <= 300) printf("Runtime: open(%s) -> fd %d\n", guest, fd);
+            return fd;
+        }
+        pthread_mutex_unlock(&lock);
+    }
+
     char path[1024];
     const uint64_t started=file_now_us();
     int e=translate(guest,path,sizeof(path));
@@ -385,27 +446,35 @@ static int64_t do_open(const char *guest,int flags,int mode) {
 #ifdef _WIN32
     /* Windows cannot open a directory as a CRT descriptor: directories are listings only. */
     (void)mode;
-    HostStat s;
     Listing *dir=NULL;
     int host=-1;
-    const int stat_result=host_stat(path,&s);
-    const int stat_error=stat_result ? errno : 0;
-    if (!stat_result && S_ISDIR(s.st_mode)) {
-        if (flags&3) return -EISDIR;
-        if (!(dir=list_directory(path))) return -EACCES;
-    } else if (flags&0x20000) {
+    if (flags&0x20000) {
+        HostStat s;
+        const int stat_result=host_stat(path,&s);
+        const int stat_error=stat_result ? errno : 0;
         e=stat_result && stat_error==ENOENT ? ENOENT : ENOTDIR;
         if (e==ENOENT) { ++missing; log_missing(guest); note_missing(guest,started); }
         return -e;
-    } else {
-        host=open(path,host_flags(flags)&~O_DIRECTORY,_S_IREAD|_S_IWRITE);
-        if (host<0) {
-            e=errno;
+    }
+    host=open(path,host_flags(flags)&~O_DIRECTORY,_S_IREAD|_S_IWRITE);
+    if (host<0) {
+        e=errno;
+        if (e==EISDIR || e==EACCES) {
+            HostStat s;
+            if (host_stat(path,&s)==0 && S_ISDIR(s.st_mode)) {
+                if (flags&3) return -EISDIR;
+                if (!(dir=list_directory(path))) return -EACCES;
+                host=-1;
+            } else {
+                if (e==ENOENT) { ++missing; log_missing(guest); note_missing(guest,started); }
+                else log_io_error("open",guest,e);
+                return -e;
+            }
+        } else {
             if (e==ENOENT) { ++missing; log_missing(guest); note_missing(guest,started); }
             else log_io_error("open",guest,e);
             return -e;
         }
-        if (host_fstat(host,&s)) memset(&s,0,sizeof(s));
     }
 #else
     int host=open(path,host_flags(flags),mode ? mode : 0644);
@@ -427,7 +496,12 @@ static int64_t do_open(const char *guest,int flags,int mode) {
     ++opens;
     pthread_mutex_unlock(&lock);
     if (opens<=300) printf("Runtime: open(%s) -> fd %d\n",guest,fd);
-    if (audio_trace() && strstr(guest,"sound/")) printf("Audio trace: open(%s) -> fd %d, %lld bytes\n",guest,fd,(long long)s.st_size);
+    if (audio_trace() && strstr(guest,"sound/")) {
+        HostStat s;
+        if (host_fstat(host,&s)==0) {
+            printf("Audio trace: open(%s) -> fd %d, %lld bytes\n",guest,fd,(long long)s.st_size);
+        }
+    }
     const char *mod_trace=BB_DIAGNOSTIC_ENV("BB_MOD_TRACE"), *mod_root=mod_trace ? getenv("BB_MODS_DIR") : NULL;
     if (mod_trace && mod_trace[0]=='1' && mod_root) {
         char actual[PATH_MAX],root[PATH_MAX];
@@ -446,7 +520,25 @@ static int64_t do_close(int fd) {
     pthread_mutex_lock(&lock);
     File *f=get(fd);
     if (!f) { pthread_mutex_unlock(&lock); return -EBADF; }
-    if (f->host>=0) close(f->host);
+    if (f->host>=0) {
+        if (!f->dir && game_path(f->path)) {
+            if (ro_fd_cache_count < RO_FD_CACHE_MAX) {
+                ro_fd_cache[ro_fd_cache_count++] = (RoFdCacheEntry){ .host = f->host };
+                snprintf(ro_fd_cache[ro_fd_cache_count-1].guest_path,
+                         sizeof(ro_fd_cache[0].guest_path), "%s", f->path);
+                f->host = -1;
+            } else {
+                close(ro_fd_cache[0].host);
+                memmove(&ro_fd_cache[0], &ro_fd_cache[1], sizeof(RoFdCacheEntry) * (RO_FD_CACHE_MAX - 1));
+                ro_fd_cache[RO_FD_CACHE_MAX - 1] = (RoFdCacheEntry){ .host = f->host };
+                snprintf(ro_fd_cache[RO_FD_CACHE_MAX - 1].guest_path,
+                         sizeof(ro_fd_cache[0].guest_path), "%s", f->path);
+                f->host = -1;
+            }
+        } else {
+            close(f->host);
+        }
+    }
     free_listing(f->dir);
     *f=(File){0};
     pthread_mutex_unlock(&lock);
