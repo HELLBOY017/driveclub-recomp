@@ -1530,9 +1530,10 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
     u64 slab_offset = 0;
 
     if (needed_bytes >= ARENA_SLAB_SIZE) {
+        const u64 alloc_size = Common::AlignUp(needed_bytes, ARENA_SLAB_SIZE);
         const vk::MemoryAllocateInfo alloc_info = {
             .pNext = &addressable,
-            .allocationSize = needed_bytes,
+            .allocationSize = alloc_size,
             .memoryTypeIndex = arena_memory_type_index,
         };
         auto alloc = instance.GetDevice().allocateMemory(alloc_info);
@@ -1564,12 +1565,13 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
                 mapped_base = static_cast<u8*>(mapping.value);
             }
         }
-        arena_slabs.push_back(ArenaSlab{
+        current_slab = ArenaSlab{
             .memory = device_memory,
-            .size = needed_bytes,
+            .size = alloc_size,
             .used = needed_bytes,
             .mapped_base = mapped_base,
-        });
+        };
+        arena_slabs.push_back(current_slab);
         slab_offset = 0;
     } else {
         if (!current_slab.memory || current_slab.used + needed_bytes > current_slab.size) {
@@ -1687,7 +1689,14 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
             *(bda_addrs++) = arena->BufferDeviceAddress() + resource_offset + block;
         }
         const u64 copy_size = (backing.end - backing.start) * sizeof(vk::DeviceAddress);
-        copies.emplace_back(offset, backing.start * sizeof(vk::DeviceAddress), copy_size);
+        const u64 dst_offset = backing.start * sizeof(vk::DeviceAddress);
+        if (!copies.empty() &&
+            copies.back().srcOffset + copies.back().size == offset &&
+            copies.back().dstOffset + copies.back().size == dst_offset) {
+            copies.back().size += copy_size;
+        } else {
+            copies.emplace_back(offset, dst_offset, copy_size);
+        }
         offset += copy_size;
     }
 

@@ -280,7 +280,7 @@ private:
         u64 used{};
         u8* mapped_base{};
     };
-    static constexpr u64 ARENA_SLAB_SIZE = 64ULL * 1024 * 1024; // 64 MiB
+    static constexpr u64 ARENA_SLAB_SIZE = 128ULL * 1024 * 1024; // 128 MiB
     std::vector<ArenaSlab> arena_slabs;
     ArenaSlab current_slab{};
 

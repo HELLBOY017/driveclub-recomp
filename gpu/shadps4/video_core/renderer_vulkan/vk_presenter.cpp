@@ -1308,7 +1308,12 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
             const double frame_ms = std::chrono::duration<double, std::milli>(status_now - status_prev).count();
             status_prev = status_now;
             status_worst_ms = std::max(status_worst_ms, frame_ms);
-            status_hitches += frame_ms > 50.0 ? 1 : 0;
+            if (frame_ms > 50.0) {
+                ++status_hitches;
+                std::printf("Presenter hitch: frame %.1f ms (source wait %.1f ms, slept %.1f ms, %u generated)\n",
+                            frame_ms, source_wait_ms, slept_ms, generated);
+                std::fflush(stdout);
+            }
         }
         const double status_s = std::chrono::duration<double>(status_now - status_window).count();
         if (status_s >= 30.0) {

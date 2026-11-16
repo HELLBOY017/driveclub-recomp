@@ -19,6 +19,7 @@
 #include <time.h>
 #ifdef _WIN32
 #include <windows.h>
+#include <io.h>
 /* 64-bit sizes and times; directories are never opened as CRT descriptors. */
 typedef struct _stat64 HostStat;
 #define host_stat(path,s) _stat64(path,s)
@@ -163,13 +164,31 @@ static void miss_add(const char *key,size_t length,int kind) {
     miss_slots[i]=(MissSlot){h,(uint32_t)miss_names_size,(uint32_t)length,(uint8_t)kind};
     miss_names_size+=length; ++miss_used;
 }
-#define RO_FD_CACHE_MAX 16
+#define RO_FD_CACHE_MAX 128
 typedef struct {
     char guest_path[512];
     int host;
 } RoFdCacheEntry;
 static RoFdCacheEntry ro_fd_cache[RO_FD_CACHE_MAX];
 static int ro_fd_cache_count;
+
+#ifdef _WIN32
+typedef struct {
+    char guest_path[64];
+    HANDLE handle;
+} MasterArchiveHandle;
+#define MASTER_ARCHIVE_MAX 64
+static MasterArchiveHandle master_archives[MASTER_ARCHIVE_MAX];
+static int master_archive_count;
+#endif
+
+typedef struct {
+    char guest[64];
+    char host[1024];
+} ResolvedPathEntry;
+#define RESOLVED_PATH_MAX 64
+static ResolvedPathEntry resolved_paths[RESOLVED_PATH_MAX];
+static int resolved_path_count;
 
 static void ro_fd_cache_clear(void) {
     for (int i = 0; i < ro_fd_cache_count; ++i) {
@@ -179,6 +198,16 @@ static void ro_fd_cache_clear(void) {
         }
     }
     ro_fd_cache_count = 0;
+#ifdef _WIN32
+    for (int i = 0; i < master_archive_count; ++i) {
+        if (master_archives[i].handle != INVALID_HANDLE_VALUE) {
+            CloseHandle(master_archives[i].handle);
+            master_archives[i].handle = INVALID_HANDLE_VALUE;
+        }
+    }
+    master_archive_count = 0;
+#endif
+    resolved_path_count = 0;
 }
 
 static void miss_reset(void) {
@@ -254,6 +283,19 @@ static int translate(const char *guest,char *out,size_t size) {
     for (const char *p=buffer;(p=strstr(p,".."));p+=2)
         if ((p==buffer || p[-1]=='/') && (p[2]==0 || p[2]=='/')) return EACCES;
     if (runtime_benchmark_marker(buffer)) return ENOENT; /* benchmark mode progress (runtime_benchmark.c) */
+
+    if (!strncmp(buffer, "/app0/game", 10) && strstr(buffer, ".dat")) {
+        pthread_mutex_lock(&lock);
+        for (int i = 0; i < resolved_path_count; ++i) {
+            if (!strcmp(resolved_paths[i].guest, buffer)) {
+                snprintf(out, size, "%s", resolved_paths[i].host);
+                pthread_mutex_unlock(&lock);
+                return 0;
+            }
+        }
+        pthread_mutex_unlock(&lock);
+    }
+
     pthread_mutex_lock(&lock);
     size_t best=0; const Mount *m=NULL;
     for (size_t i=0;i<mount_count;++i) {
@@ -303,6 +345,19 @@ static int translate(const char *guest,char *out,size_t size) {
         char alt[1024];
         if ((size_t)snprintf(alt,sizeof(alt),"%s%s",app0_base,buffer+5)<sizeof(alt) && access(alt,F_OK)==0)
             snprintf(out,size,"%s",alt);
+    }
+    if (!result && resolved_path_count < RESOLVED_PATH_MAX &&
+        !strncmp(buffer, "/app0/game", 10) && strstr(buffer, ".dat")) {
+        int exists = 0;
+        for (int i = 0; i < resolved_path_count; ++i) {
+            if (!strcmp(resolved_paths[i].guest, buffer)) { exists = 1; break; }
+        }
+        if (!exists) {
+            snprintf(resolved_paths[resolved_path_count].guest,
+                     sizeof(resolved_paths[0].guest), "%s", buffer);
+            snprintf(resolved_paths[resolved_path_count++].host,
+                     sizeof(resolved_paths[0].host), "%s", out);
+        }
     }
     pthread_mutex_unlock(&lock);
     if (result==ENOENT) fprintf(stderr,"Runtime: no mount for guest path %s\n",guest);
@@ -412,6 +467,26 @@ static int64_t do_open(const char *guest,int flags,int mode) {
                 break;
             }
         }
+#ifdef _WIN32
+        if (cached_host < 0) {
+            HANDLE master = INVALID_HANDLE_VALUE;
+            for (int i = 0; i < master_archive_count; ++i) {
+                if (!strcmp(master_archives[i].guest_path, guest)) {
+                    master = master_archives[i].handle;
+                    break;
+                }
+            }
+            if (master != INVALID_HANDLE_VALUE) {
+                HANDLE reopened = ReOpenFile(master, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_ATTRIBUTE_NORMAL);
+                if (reopened != INVALID_HANDLE_VALUE) {
+                    cached_host = _open_osfhandle((intptr_t)reopened, _O_RDONLY | _O_BINARY);
+                    if (cached_host < 0) {
+                        CloseHandle(reopened);
+                    }
+                }
+            }
+        }
+#endif
         if (cached_host >= 0) {
             int fd = -1;
             for (int i = 3; i < MAX_FILES; ++i) {
@@ -488,6 +563,26 @@ static int64_t do_open(const char *guest,int flags,int mode) {
     if (!fstat(host,&s) && S_ISDIR(s.st_mode)) dir=list_directory(path);
 #endif
     pthread_mutex_lock(&lock);
+#ifdef _WIN32
+    if (host >= 0 && is_ro_game && master_archive_count < MASTER_ARCHIVE_MAX &&
+        !strncmp(guest, "/app0/game", 10) && strstr(guest, ".dat")) {
+        int exists = 0;
+        for (int i = 0; i < master_archive_count; ++i) {
+            if (!strcmp(master_archives[i].guest_path, guest)) { exists = 1; break; }
+        }
+        if (!exists) {
+            HANDLE osf = (HANDLE)_get_osfhandle(host);
+            if (osf != INVALID_HANDLE_VALUE) {
+                HANDLE dup = INVALID_HANDLE_VALUE;
+                if (DuplicateHandle(GetCurrentProcess(), osf, GetCurrentProcess(), &dup, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
+                    snprintf(master_archives[master_archive_count].guest_path,
+                             sizeof(master_archives[0].guest_path), "%s", guest);
+                    master_archives[master_archive_count++].handle = dup;
+                }
+            }
+        }
+    }
+#endif
     int fd=-1;
     for (int i=3;i<MAX_FILES;++i) if (!files[i].used) { fd=i; break; }
     if (fd<0) { pthread_mutex_unlock(&lock); if (host>=0) close(host); free_listing(dir); return -EMFILE; }
@@ -559,13 +654,16 @@ static ssize_t host_write(int h,const void *buffer,uint64_t size) { return write
 #endif
 /* Pages of the destination may be write-protected for GPU tracking: the kernel's copy then
  * fails with EFAULT instead of faulting to our handler. A user-mode write to each page first
- * goes through the handler, which unprotects it (and records the upcoming write). */
+ * goes through the handler, which unprotects it (and records the upcoming write).
+ * Host heap/CRT memory is below USER_MIN (0x1000000000) and is never GPU-tracked. */
 static void touch_for_write(void *buffer,uint64_t size) {
     if (!size) return;
-    uintptr_t p=(uintptr_t)buffer & ~(uintptr_t)4095, end=(uintptr_t)buffer+size;
-    for (; p<end; p+=4096) {
-        volatile unsigned char *b=(volatile unsigned char *)(p<(uintptr_t)buffer ? (uintptr_t)buffer : p);
-        *b=*b;
+    uintptr_t start = (uintptr_t)buffer;
+    if (start < UINT64_C(0x1000000000) || start >= UINT64_C(0xfc00000000)) return;
+    uintptr_t p = start & ~(uintptr_t)4095, end = start + size;
+    for (; p < end; p += 4096) {
+        volatile unsigned char *b = (volatile unsigned char *)(p < start ? start : p);
+        *b = *b;
     }
 }
 static int64_t do_read(int fd,void *buffer,uint64_t size) {
