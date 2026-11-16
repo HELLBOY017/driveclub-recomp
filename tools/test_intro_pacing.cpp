@@ -43,5 +43,14 @@ int main() {
     }
     assert(players.load() == 0);
     assert(EffectiveLimit(72) == 72);
+    {
+        Playback intro;
+        intro.SetActive(true);
+        assert(EffectiveLimit(60) == 30);
+        MarkStartupDone();
+        assert(!IsIntro("dc_attract_video_30fps_11.v3_256.mp4"));
+        assert(EffectiveLimit(60) == 60);
+        intro.SetActive(false);
+    }
     std::cout << "PASS intro classification, cap preservation, pause/resume, stop/close, overlapping players and concurrent lifecycle\n";
 }

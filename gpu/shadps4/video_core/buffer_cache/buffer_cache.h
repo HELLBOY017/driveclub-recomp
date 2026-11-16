@@ -169,6 +169,8 @@ public:
     /// Commits pending sparse buffer memory binds. Must be called before every scheduler submit.
     void SubmitPendingArenaBinds(Vulkan::SubmitInfo& info);
 
+    bool dma_buffers_dirty = true;
+
     /// bbport: BB_READBACK_EARLY: at the end of each submission (submit callback, GPU thread), copies the
     /// GPU-modified ranges of the readback windows it wrote that the guest read recently into staging. A guest
     /// read then waits for that submission only, not for everything recorded until the read fault.

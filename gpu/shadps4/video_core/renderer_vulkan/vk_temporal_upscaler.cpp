@@ -750,7 +750,7 @@ void TemporalUpscaler::ExtraSharpen(vk::CommandBuffer cmdbuf, vk::Image target, 
     if (extra_sharpen_width != w || extra_sharpen_height != h) {
         // Retired command buffers may still read the old copy. `cmdbuf` stays open.
         if (extra_sharpen_image) {
-            scheduler.WaitSubmitted();
+            scheduler.DeferOperation([old_img = std::move(extra_sharpen_image), old_view = std::move(extra_sharpen_view)] {});
         }
         extra_sharpen_view.reset();
         extra_sharpen_image = VideoCore::UniqueImage(device, instance.GetAllocator());

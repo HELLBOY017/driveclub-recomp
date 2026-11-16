@@ -72,6 +72,8 @@ void bbgpu_reflex_on_input_sampled(void);
 void bbgpu_reflex_on_simulation_end(void);
 /* Returns the current monotonic simulation frame ID (0 if not active/supported). */
 uint64_t bbgpu_reflex_current_sim_frame_id(void);
+/* Intro pacing: marks game startup complete so attract/intro video pacing never clamps in-race presentation. */
+void bbgpu_mark_startup_done(void);
 #ifdef __cplusplus
 }
 #endif

@@ -1,4 +1,5 @@
 #include "bbport_diagnostics.h"
+#include "bbport_intro_pacing.h"
 #include "bbport_recent.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "bbport_write_log.h"
@@ -549,4 +550,8 @@ extern "C" void bbgpu_reflex_on_simulation_end(void) {
 
 extern "C" uint64_t bbgpu_reflex_current_sim_frame_id(void) {
     return Vulkan::Reflex::CurrentSimFrameId();
+}
+
+extern "C" void bbgpu_mark_startup_done(void) {
+    BbIntroPacing::MarkStartupDone();
 }

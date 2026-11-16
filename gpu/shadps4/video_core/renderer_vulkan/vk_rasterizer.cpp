@@ -1635,7 +1635,7 @@ void Rasterizer::CaptureHdrHudless(VideoCore::ImageId display, VAddr address) {
     }
     if (copy->width != w || copy->height != h || copy->format != image.info.pixel_format) {
         if (copy->image) {
-            scheduler.WaitSubmitted();  // the presenter may still read the old one
+            scheduler.DeferOperation([old_img = std::move(copy->image), old_view = std::move(copy->view)] {});
         }
         copy->view.reset();
         copy->image = VideoCore::UniqueImage(instance.GetDevice(), instance.GetAllocator());
@@ -1723,7 +1723,7 @@ void Rasterizer::CaptureHdrHudless(VideoCore::ImageId display, VAddr address) {
     }
     if (copy->scene_width != sw || copy->scene_height != sh || copy->scene_format != scene_format) {
         if (copy->scene) {
-            scheduler.WaitSubmitted();
+            scheduler.DeferOperation([old_scene = std::move(copy->scene), old_view = std::move(copy->scene_view)] {});
         }
         copy->scene_view.reset();
         copy->scene = VideoCore::UniqueImage(instance.GetDevice(), instance.GetAllocator());

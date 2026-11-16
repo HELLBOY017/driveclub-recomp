@@ -1243,8 +1243,17 @@ static ABI int32_t pad_vibration(int32_t handle, const uint8_t *param) {
     pthread_mutex_lock(&lock);
     SDL_Gamepad *g=current_gamepad();
     const bool hap=hap_active && g==gamepad;   /* the haptics stream plays the rumble: the motors stay off, or SDL mutes the haptics */
-    if (g && !SDL_RumbleGamepad(g,hap ? 0 : (uint16_t)(param[1]*257u),hap ? 0 : (uint16_t)(param[0]*257u),0xFFFFFFFFu)) {
-        static int warned; if (!warned++) printf("Runtime: rumble not available on this pad: %s\n",SDL_GetError());
+    const uint16_t low = hap ? 0 : (uint16_t)(param[1]*257u);
+    const uint16_t high = hap ? 0 : (uint16_t)(param[0]*257u);
+    static uint16_t last_low = 0xffff, last_high = 0xffff;
+    static SDL_Gamepad *last_g = NULL;
+    if (g != last_g || low != last_low || high != last_high) {
+        last_g = g;
+        last_low = low;
+        last_high = high;
+        if (g && !SDL_RumbleGamepad(g, low, high, 0xFFFFFFFFu)) {
+            static int warned; if (!warned++) printf("Runtime: rumble not available on this pad: %s\n",SDL_GetError());
+        }
     }
     pthread_mutex_unlock(&lock);
     return 0;

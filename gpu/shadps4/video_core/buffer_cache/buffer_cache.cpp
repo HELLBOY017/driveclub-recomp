@@ -249,6 +249,7 @@ BufferCache::~BufferCache() {
 }
 
 void BufferCache::InvalidateMemory(VAddr device_addr, u64 size, bool assume_locks) {
+    dma_buffers_dirty = true;
     memory_tracker->InvalidateRegion(device_addr, size, [this, device_addr, size, assume_locks] {
         ReadMemory(device_addr, size, true, assume_locks);
     });
@@ -279,6 +280,7 @@ void BufferCache::SmallGuestCopy(const BbCopy::Item& item) {
 }
 
 void BufferCache::ExtendWriteFault(VAddr device_addr) {
+    dma_buffers_dirty = true;
     static const u64 window = [] {
         const char* env = std::getenv("BB_FAULT_WINDOW");
         const u64 kib = env ? std::strtoull(env, nullptr, 10) : 256;
@@ -358,6 +360,7 @@ void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool as
                                           arena_end);
         DownloadMemory(arena, window_start, window_end - window_start);
         if (is_write) {
+            dma_buffers_dirty = true;
             memory_tracker->MarkRegionAsCpuModified(device_addr, size);
         }
     };
@@ -1217,6 +1220,7 @@ bool BufferCache::QueueUntrackedStore(VAddr addr, const void* data, u32 size) {
         return false;
     }
     std::scoped_lock lk{queued_store_mutex};
+    dma_buffers_dirty = true;
     queued_stores.push_back({lo, hi});
     num_queued_stores.fetch_add(1, std::memory_order_release);
     return true;
@@ -1401,6 +1405,10 @@ void BufferCache::ProcessFaultBuffer() {
 }
 
 void BufferCache::SynchronizeDmaBuffers() {
+    if (!dma_buffers_dirty) {
+        return;
+    }
+    dma_buffers_dirty = false;
     for (const auto& range : resident_ranges) {
         const u64 page = range.start >> (arena_page_bits - block_shift);
         const VAddr device_addr = range.start << block_shift;
@@ -1663,6 +1671,7 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
         backing.offset = (slab_offset + memory_offset) >> block_shift; // in blocks, like start and end (Backing::SubRange)
         backing.base = mapped_base;
         resident_ranges.Add(backing);
+        dma_buffers_dirty = true;
 
         LOG_INFO(Render, "Making range start={}, end={} resident", backing.start, backing.end);
 

@@ -1009,6 +1009,9 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
             next_flip = std::chrono::steady_clock::now() + frame_period;
             std::printf("VideoOut: presentation cap %u FPS (configured %u; intro pacing %s)\n",
                         frame_limit, configured_limit, frame_limit != configured_limit ? "active" : "restored");
+            if (frame_limit == configured_limit) {
+                BbIntroPacing::MarkStartupDone();
+            }
         }
         const bool immediate_flips = frame_limit != 0;
         timer.Start();

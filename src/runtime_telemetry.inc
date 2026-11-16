@@ -277,7 +277,7 @@ static void tele_triggers(const uint8_t *state, float speed) {
             if (kick > right_rumble) right_rumble = kick;
         }
 
-        if (left_rumble == 0 && right_rumble == 0 && last_left_rumble == 0 && last_right_rumble == 0) {
+        if (left_rumble == last_left_rumble && right_rumble == last_right_rumble) {
             return;
         }
 

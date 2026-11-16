@@ -960,7 +960,7 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     // timing) came in bursts: 12.5/25 ms alternation at 80 FPS. 0 turns it off.
     static const u32 frames_ahead = [] {
         const char* env = std::getenv("BB_FRAMES_AHEAD");
-        return env ? u32(std::max(0, std::atoi(env))) : 1u;
+        return env ? u32(std::max(0, std::atoi(env))) : 2u;
     }();
     s64 ahead_start = 0, ahead_end = 0;
     if (frames_ahead) {

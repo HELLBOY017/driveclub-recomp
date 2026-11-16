@@ -10,6 +10,10 @@ namespace BbIntroPacing {
 inline std::atomic<unsigned> players{0};
 inline std::atomic<bool> startup_done{false};
 
+inline void MarkStartupDone() {
+    startup_done.store(true, std::memory_order_relaxed);
+}
+
 inline bool IsIntro(std::string_view path) {
     if (startup_done.load(std::memory_order_relaxed)) return false;
     const auto slash = path.find_last_of("/\\");
@@ -32,16 +36,8 @@ public:
     void SetActive(bool active) {
         std::lock_guard lock(mutex);
         if (active == counted) return;
-        if (active) {
-            if (!startup_done.load(std::memory_order_relaxed)) {
-                players.fetch_add(1, std::memory_order_relaxed);
-            }
-        } else {
-            if (counted) {
-                players.fetch_sub(1, std::memory_order_relaxed);
-                startup_done.store(true, std::memory_order_relaxed);
-            }
-        }
+        if (active) players.fetch_add(1, std::memory_order_relaxed);
+        else players.fetch_sub(1, std::memory_order_relaxed);
         counted = active;
     }
 private:

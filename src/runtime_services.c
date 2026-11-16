@@ -404,7 +404,11 @@ static ABI int32_t system_event(void *event) {
     printf("SystemService: event %#x delivered (caller %p)\n",*(uint32_t*)event,__builtin_return_address(0));
     return 0;
 }
-static ABI int32_t hide_splash(void) { note("SystemService: splash screen hidden"); return 0; }
+static ABI int32_t hide_splash(void) {
+    bbgpu_mark_startup_done();
+    note("SystemService: splash screen hidden");
+    return 0;
+}
 static ABI int32_t launch_browser(void) { note("SystemService: web browser request ignored (offline)"); return 0; }
 
 /* ---- NetCtl / Net / Http / Ssl: no network ---- */
