@@ -913,9 +913,20 @@ ImageId TextureCache::FindImageFromRange(VAddr address, size_t size, bool ensure
                 return image_ids[i];
             }
         }
-        LOG_WARNING(Render_Vulkan,
-                    "Failed to find exact image match for copy addr={:#x}, size={:#x}", address,
-                    size);
+        // If no exact size match, pick the closest candidate that can cover the copy
+        ImageId best_id{};
+        size_t best_diff = std::numeric_limits<size_t>::max();
+        for (s32 i = 0; i < image_ids.size(); ++i) {
+            Image& image = slot_images[image_ids[i]];
+            const size_t diff = image.info.guest_size > size ? image.info.guest_size - size : size - image.info.guest_size;
+            if (diff < best_diff) {
+                best_diff = diff;
+                best_id = image_ids[i];
+            }
+        }
+        if (best_id) {
+            return best_id;
+        }
     }
     return {};
 }
@@ -1201,6 +1212,15 @@ void TextureCache::TrackImage(ImageId image_id) {
         return;
     }
 
+    // Giant GPU-rendered arrays (such as the 179 MiB 128-layer cubemap array at 0x1000000000)
+    // are written exclusively by GPU compute dispatches and never modified by the guest CPU.
+    // Protecting 43k+ pages with hundreds of range locks causes an 80-160 ms hitch at race start.
+    if (image.info.guest_size >= 64 * 1024 * 1024) {
+        image.track_addr = image_begin;
+        image.track_addr_end = image_end;
+        return;
+    }
+
     if (!image.IsTracked()) {
         // Re-track the whole image
         image.track_addr = image_begin;
@@ -1257,7 +1277,7 @@ void TextureCache::UntrackImage(ImageId image_id) {
     const auto size = image.track_addr_end - image.track_addr;
     image.track_addr = 0;
     image.track_addr_end = 0;
-    if (size != 0) {
+    if (size != 0 && image.info.guest_size < 64 * 1024 * 1024) {
         tracker.UpdatePageWatchers<false>(addr, size);
     }
 }

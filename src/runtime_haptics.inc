@@ -78,7 +78,13 @@ static DWORD WINAPI hap_thread(void *arg) {
     WAVEFORMATEX *fmt = NULL;
     HRESULT hr = co_create(&hap_clsid_enum, NULL, CLSCTX_ALL, &hap_iid_enum, (void **)&en);
     if (SUCCEEDED(hr)) dev = hap_find_device(en);
-    if (!dev) { printf("Runtime: haptics: no DualSense sound device (USB cable needed), triggers only\n"); return 0; }
+    if (!dev) {
+        const char *env = getenv("BB_TELEMETRY_TRACE");
+        if (env && env[0] == '1') {
+            printf("Runtime: haptics: no DualSense sound device (USB cable needed), triggers only\n");
+        }
+        return 0;
+    }
     hr = IMMDevice_Activate(dev, &hap_iid_client, CLSCTX_ALL, NULL, (void **)&ac);
     if (SUCCEEDED(hr)) hr = IAudioClient_GetMixFormat(ac, &fmt);
     if (FAILED(hr) || !fmt || fmt->nChannels < 4 || fmt->wBitsPerSample != 32) {

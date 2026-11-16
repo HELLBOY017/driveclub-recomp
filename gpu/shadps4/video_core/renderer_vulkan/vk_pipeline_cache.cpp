@@ -963,7 +963,11 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
     const bool keyed = spec_memo != 0 && Shader::StageSpecializationKey::Supported(info);
     if (keyed) {
         key.Build(info, runtime_info, binding);
-        if ((++memo_lookups & ((1u << 20) - 1)) == 0) {
+        static const bool spec_trace = [] {
+            const char* env = BB_DIAGNOSTIC_ENV("BB_SPEC_TRACE");
+            return env && env[0] == '1';
+        }();
+        if (spec_trace && (++memo_lookups & ((1u << 20) - 1)) == 0) {
             std::printf("Spec memo: %.1f%% of lookups reused the previous permutation (%llu checked hits differed)\n",
                         100.0 * memo_hits / memo_lookups, static_cast<unsigned long long>(memo_mismatches));
         }

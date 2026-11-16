@@ -238,7 +238,10 @@ static void tele_triggers(const uint8_t *state, float speed) {
         static bool xbox_logged;
         if (!xbox_logged) {
             xbox_logged = true;
-            printf("Runtime: Xbox impulse triggers active on %s\n", name ? name : "controller");
+            const char *env = getenv("BB_TELEMETRY_TRACE");
+            if (env && env[0] == '1') {
+                printf("Runtime: Xbox impulse triggers active on %s\n", name ? name : "controller");
+            }
         }
         const float *ratio = (const float *)(state + 0xb30);
         const float front = fminf(ratio[0], ratio[1]);   /* most negative: a locking front wheel */
@@ -291,7 +294,12 @@ static void tele_publish(const uint8_t *state, float speed) {
         const char *e = getenv("BB_ADAPTIVE_TRIGGERS");
         const char *xb = getenv("BB_IMPULSE_TRIGGERS");
         tele_triggers_on = (e && *e && *e != '0') || (xb && *xb && *xb != '0');
-        if (tele_triggers_on) printf("Runtime: adaptive & impulse triggers on (DualSense / Xbox)\n");
+        if (tele_triggers_on) {
+            const char *env = getenv("BB_TELEMETRY_TRACE");
+            if (env && env[0] == '1') {
+                printf("Runtime: adaptive & impulse triggers on (DualSense / Xbox)\n");
+            }
+        }
     }
     if (tele_udp_on) tele_send_dash(state, speed);
     if (tele_triggers_on) {
@@ -337,7 +345,10 @@ static void tele_sample(int index) {
     } while (0);
     if (stage!=stage_logged) {   /* where the chain stops, when it changes: no car, or the game's code is not what was read */
         stage_logged=stage;
-        printf("Runtime: telemetry: car chain stage %d%s\n",stage,stage==6 ? " (car found)" : "");
+        const char *env = getenv("BB_TELEMETRY_TRACE");
+        if (env && env[0] == '1') {
+            printf("Runtime: telemetry: car chain stage %d%s\n",stage,stage==6 ? " (car found)" : "");
+        }
     }
     if (stage<6) { tele_car.us=0; return; }
     const uintptr_t state=tele_rd(iface,0x8), setup=tele_rd(iface,0x20), drive=tele_rd(setup,0x8);
@@ -385,6 +396,14 @@ static void tele_install(void) {
     static bool done;
     if (done || !runtime_image_base) return;
     done=true;
+    if (tele_triggers_on < 0) {
+        const char *e = getenv("BB_ADAPTIVE_TRIGGERS");
+        const char *xb = getenv("BB_IMPULSE_TRIGGERS");
+        tele_triggers_on = (e && *e && *e != '0') || (xb && *xb && *xb != '0');
+    }
+    if (tele_triggers_on) {
+        hap_start();
+    }
     unsigned char *call=(unsigned char *)(runtime_image_base+0xd93044);
     int32_t rel; memcpy(&rel,call+1,4);
     if (call[0]!=0xe8 || (uintptr_t)(call+5+rel)!=runtime_image_base+0xd93790) {
