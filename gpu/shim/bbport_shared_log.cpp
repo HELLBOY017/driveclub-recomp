@@ -73,7 +73,11 @@ u64 PS4_SYSV_ABI Allocate(u32 size, u32 align, u32 tag, u32 site) {
         if (result & 4095) {
             g_misaligned.fetch_add(1, std::memory_order_relaxed);
         }
-        if (n <= 3 || n % 50 == 0 || (result & 4095)) {
+        static const bool shared_trace = [] {
+            const char* env = BB_DIAGNOSTIC_ENV("BB_SHARED_TRACE");
+            return env && env[0] == '1';
+        }();
+        if (n <= 3 || (result & 4095) || (shared_trace && n % 50 == 0)) {
             std::printf("BB_SHARED_PAD: %llu payloads padded (+%llu bytes), %llu not page-aligned; last %u -> %u bytes at %#llx\n",
                         (unsigned long long)n, (unsigned long long)g_pad_bytes.load(), (unsigned long long)g_misaligned.load(),
                         asked, size, (unsigned long long)result);

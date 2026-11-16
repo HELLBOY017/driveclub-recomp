@@ -508,7 +508,7 @@ static int64_t do_open(const char *guest,int flags,int mode) {
             snprintf(files[fd].path, sizeof(files[fd].path), "%s", guest);
             ++opens;
             pthread_mutex_unlock(&lock);
-            if (opens <= 300) printf("Runtime: open(%s) -> fd %d\n", guest, fd);
+            if (opens <= 30) printf("Runtime: open(%s) -> fd %d\n", guest, fd);
             return fd;
         }
         pthread_mutex_unlock(&lock);
@@ -590,7 +590,7 @@ static int64_t do_open(const char *guest,int flags,int mode) {
     snprintf(files[fd].path,sizeof(files[fd].path),"%s",guest);
     ++opens;
     pthread_mutex_unlock(&lock);
-    if (opens<=300) printf("Runtime: open(%s) -> fd %d\n",guest,fd);
+    if (opens<=30) printf("Runtime: open(%s) -> fd %d\n",guest,fd);
     if (audio_trace() && strstr(guest,"sound/")) {
         HostStat s;
         if (host_fstat(host,&s)==0) {

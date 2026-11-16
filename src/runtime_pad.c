@@ -1230,7 +1230,9 @@ static ABI int32_t pad_info(int32_t handle, ControllerInfo *info) { PADLOG("sceP
 static ABI int32_t pad_vibration(int32_t handle, const uint8_t *param) {
     if (!handle_ok(handle)) return ERR_INVALID_HANDLE;
     if (!param) return ERR_INVALID_ARG;
-    { static unsigned n; if (n++<12 || ((param[0] || param[1]) && n<200)) printf("Runtime: scePadSetVibration large %u small %u\n",param[0],param[1]); }
+    { static unsigned n; static int trace = -1;
+      if (trace < 0) { const char *e = getenv("BB_PAD_TRACE"); trace = (e && e[0] == '1') ? 1 : 0; }
+      if (trace && (n++<12 || ((param[0] || param[1]) && n<200))) printf("Runtime: scePadSetVibration large %u small %u\n",param[0],param[1]); }
     hap_rumble_large=param[0]; hap_rumble_small=param[1];
     pthread_mutex_lock(&lock);
     SDL_Gamepad *g=current_gamepad();

@@ -422,6 +422,7 @@ private:
     VideoCore::TextureCache texture_cache;
     // Host-only expansion: high-resolution tile lists must not overwrite guest allocations.
     std::unordered_map<VAddr, std::unique_ptr<VideoCore::Buffer>> lighting_lists;
+    std::unique_ptr<VideoCore::Buffer> preallocated_lighting_list;
     AmdGpu::Liverpool* liverpool;
     Core::MemoryManager* memory;
     boost::icl::interval_set<VAddr> mapped_ranges;

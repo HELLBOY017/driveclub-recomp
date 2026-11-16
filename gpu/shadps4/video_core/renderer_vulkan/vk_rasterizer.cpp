@@ -146,6 +146,9 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
     g_drive_motion = &upscaler->GetDriveMotion();
     drive_aa = std::make_unique<DriveAA>(instance, scheduler, texture_cache, runtime,
                                          upscaler->GetDriveMotion(), *camera_motion);
+    preallocated_lighting_list = std::make_unique<VideoCore::Buffer>(
+        instance, 0, 4ULL * 1024 * 1024, VideoCore::MemoryType::DeviceLocal,
+        "DriveClub expanded lighting tile list");
     if (!EmulatorSettings.IsNullGPU()) {
         liverpool->BindRasterizer(this);
     }
@@ -3022,12 +3025,6 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                 }();
                 if (lighting_cull_fix && stage.pgm_hash == 0xbfce517cull && buffer_index == 1) {
                     runtime.FillBuffer(buffer, offset, size, 0x0003f00fu);
-                    static u32 logged{};
-                    if (logged++ < 8) {
-                        LOG_WARNING(Render_Vulkan,
-                                    "DriveClub culling: expanded HTILE at {:#x}, {} bytes",
-                                    vsharp.base_address, size);
-                    }
                 }
                 bool host_lighting_list = false;
                 const bool list_writer = stage.pgm_hash == 0xbfce517cull && buffer_index == 5;
@@ -3048,12 +3045,13 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                                     if (replacement) {
                                         scheduler.DeferOperation([old = std::move(replacement)] {});
                                     }
-                                    replacement = std::make_unique<VideoCore::Buffer>(
-                                        instance, 0, target_size, VideoCore::MemoryType::DeviceLocal,
-                                        "DriveClub expanded lighting tile list");
-                                    LOG_WARNING(Render_Vulkan,
-                                                "DriveClub culling: resized host tile list {} -> {} bytes ({}x{})",
-                                                size, target_size, w, h);
+                                    if (preallocated_lighting_list && preallocated_lighting_list->SizeBytes() >= target_size) {
+                                        replacement = std::move(preallocated_lighting_list);
+                                    } else {
+                                        replacement = std::make_unique<VideoCore::Buffer>(
+                                            instance, 0, target_size, VideoCore::MemoryType::DeviceLocal,
+                                            "DriveClub expanded lighting tile list");
+                                    }
                                 }
                                 if (replacement && replacement->SizeBytes() >= required) {
                                     buffer = replacement.get();
@@ -3538,8 +3536,12 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                     range.extent.levels = hi - lo + 1;
                     use.narrowed = true;
                     cube_sampler = cube_mode == 2 ? 3 : 0;
+                    static const bool cube_lod_trace = [] {
+                        const char* env = BB_DIAGNOSTIC_ENV("BB_CUBE_LOD_TRACE");
+                        return env && env[0] == '1';
+                    }();
                     static std::atomic<u32> logged{0};
-                    if (logged.fetch_add(1, std::memory_order_relaxed) < 64) {
+                    if (cube_lod_trace && logged.fetch_add(1, std::memory_order_relaxed) < 64) {
                         std::printf("BB_CUBE_LOD_RANGE: image %llx lambda %.3f %s view [mip %u+%u] -> reads [mip "
                                     "%u+%u layer %u+%u]%s\n",
                                     static_cast<unsigned long long>(image.info.guest_address), cube_lod->lambda,

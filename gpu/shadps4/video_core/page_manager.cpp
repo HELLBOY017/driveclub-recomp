@@ -1924,9 +1924,15 @@ u64 RegisterExactSlots(const u8* o, u32 size, const ExactSlots& s, u32 slot, boo
             g_exact_labels.push_back({o, s.labels[i], s.payloads[i], size, s.counts[i], ++g_exact_ids, gen, 0, false,
                                       flush});
             it = g_exact_labels.end() - 1;
-            std::printf("Exposure exact: slot %u of %p: payload %llx (%u bytes), count %llx, label %llx, id %llu\n",
-                        i, (const void*)o, (unsigned long long)s.payloads[i], size, (unsigned long long)s.counts[i],
-                        (unsigned long long)s.labels[i], (unsigned long long)it->id);
+            static const bool exposure_trace = [] {
+                const char* env = BB_DIAGNOSTIC_ENV("BB_EXPOSURE_TRACE");
+                return env && env[0] == '1';
+            }();
+            if (exposure_trace) {
+                std::printf("Exposure exact: slot %u of %p: payload %llx (%u bytes), count %llx, label %llx, id %llu\n",
+                            i, (const void*)o, (unsigned long long)s.payloads[i], size, (unsigned long long)s.counts[i],
+                            (unsigned long long)s.labels[i], (unsigned long long)it->id);
+            }
         } else if (gen < it->last_gen) { // the object was made again at the same addresses
             it->id = ++g_exact_ids;
             it->tagged = false;
@@ -2078,8 +2084,12 @@ PS4_SYSV_ABI bool ExposureExactGet(void* obj, u32 frame, void** out, u32* count)
     const u32 flags = *reinterpret_cast<const u32*>(o + 0x10);
     const int mode = Site == 5 ? 1 : ExposureExactMode();
     if constexpr (Site == 5) {
+        static const bool exposure_trace = [] {
+            const char* env = BB_DIAGNOSTIC_ENV("BB_EXPOSURE_TRACE");
+            return env && env[0] == '1';
+        }();
         static std::atomic<u32> logged{0};
-        if (logged.fetch_add(1, std::memory_order_relaxed) < 8) {
+        if (exposure_trace && logged.fetch_add(1, std::memory_order_relaxed) < 8) {
             std::printf("Exposure exact site 5: object %p flags %#x +0xc %u, frame %u%s\n", obj, flags,
                         *reinterpret_cast<const u32*>(o + 0xc), frame, flags == Flags ? "" : ": not served");
         }
@@ -2214,8 +2224,12 @@ PS4_SYSV_ABI bool CountedExactGet(void* obj, u32 frame, void** out, u32* count, 
         Site == 3 ? flags == 0x36 : (flags & 0x20) && maximum != 0 && maximum <= QueryMaxBytes / 32u;
     const u32 Size = Site == 3 ? 16u : eligible ? maximum * 32u : 0u;
     if constexpr (Site == 4) {
+        static const bool exposure_trace = [] {
+            const char* env = BB_DIAGNOSTIC_ENV("BB_EXPOSURE_TRACE");
+            return env && env[0] == '1';
+        }();
         static std::atomic<u32> logged{0};
-        if (logged.fetch_add(1, std::memory_order_relaxed) < 8) {
+        if (exposure_trace && logged.fetch_add(1, std::memory_order_relaxed) < 8) {
             std::printf("Exposure exact site 4: object %p flags %#x maximum %u entries (%u bytes), frame %u%s\n", obj,
                         flags, maximum, Size, frame, eligible ? "" : ": not served");
         }
